@@ -22,6 +22,7 @@ class JobType(str, enum.Enum):
     edit_rome = "edit_rome"
     edit_memit = "edit_memit"
     erase_elm = "erase_elm"
+    rollback = "rollback"
 
 
 class EditJob(Base):

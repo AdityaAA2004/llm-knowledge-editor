@@ -48,3 +48,15 @@ class AuditLogRead(BaseModel):
 
 class RollbackRequest(BaseModel):
     checkpoint_id: uuid.UUID
+
+
+class EraseJobCreate(BaseModel):
+    triple_ids: list[uuid.UUID]
+
+
+class ModelStatusRead(BaseModel):
+    model_config = {"protected_namespaces": ()}
+
+    model_id: str
+    active_checkpoint: ModelCheckpointRead | None
+    total_checkpoints: int

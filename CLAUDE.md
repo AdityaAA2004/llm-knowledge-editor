@@ -1,22 +1,64 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
 # SLM Knowledge Platform — CLAUDE.md
 
 ## Project Summary
 
 A monorepo platform for managing a company's backend API knowledge base encoded into a LLaMA 3.2 3B SLM. Content managers CRUD API knowledge (company → team → API → endpoint → variant); changes are pushed to the model asynchronously via rank-one editing (ROME), batch editing (MEMIT), or concept erasure (ELM). The model is a queryable artifact — Postgres is the canonical source of truth.
 
-Full architecture spec: `slm-platform-architecture.md`
-
 ---
 
 ## Monorepo Layout
 
 ```
-slm-knowledge-platform/
+rank_one_model_editing_project/   ← repo root
   backend/      FastAPI + SQLAlchemy 2.0 + Alembic + Celery client
   worker/       Celery worker (separate Docker service, GPU)
   frontend/     Next.js 14 App Router + TanStack Query + Tailwind
   docker-compose.yml
+  .env
   .env.example
+```
+
+---
+
+## Dev Commands
+
+```bash
+# Backend — activate venv first (Python 3.12, not 3.13)
+source backend/.venv/bin/activate
+
+# Run API server (auto-reloads on file change)
+cd backend && uvicorn app.main:app --reload --port 8000
+
+# Interactive API docs (once server is running)
+# http://localhost:8000/docs      ← Swagger UI
+# http://localhost:8000/redoc     ← ReDoc
+# http://localhost:8000/health    ← health check
+
+# Run Alembic migrations
+cd backend && alembic upgrade head
+
+# Create a new migration after model changes
+cd backend && alembic revision --autogenerate -m "describe the change"
+
+# Run Celery worker (Phase 3+)
+cd worker && celery -A celery_app worker -Q model_writes --concurrency=1 --loglevel=info
+```
+
+All env vars (DATABASE_URL, REDIS_URL, CELERY_BROKER_URL, etc.) live in `.env` at the repo root. The backend loads it via `python-dotenv` in `app/main.py`.
+
+```bash
+# Docker (preferred) — runs backend + worker + postgres + redis
+docker compose up -d
+docker compose logs worker -f        # watch Celery task execution
+docker compose logs backend worker -f # both together
+docker compose down
+
+# Rebuild after code changes
+docker compose build && docker compose up -d
 ```
 
 ---
@@ -55,17 +97,30 @@ slm-knowledge-platform/
 - Pydantic v2 schemas: Create/Update/Read for all KB entities, `TripleRead`, `EditJobCreate/Read`, `ModelCheckpointRead`, `RollbackRequest`
 - Backend venv at `backend/.venv` using **Python 3.12** (3.13 has no asyncpg/psycopg2 wheels yet)
 
-### Phase 2 — Backend API 🔜 NEXT
-- FastAPI app skeleton (CORS, health check, router registration)
-- KB CRUD routes — teams, apis, endpoints, variants; soft delete + cascade triple collection
-- Triple derivation service — every KB save auto-generates `(s, r, o)` triples
-- Exit condition: POST team → POST api → triples appear at `GET /triples/`
+### Phase 2 — Backend API ✅ COMPLETE
+- FastAPI app skeleton (CORS, health check, router registration) — `backend/app/main.py`
+- KB CRUD routes — companies, teams, apis, endpoints, variants; soft delete + cascade triple marking — `backend/app/routers/`
+- Triple derivation service — every KB save auto-generates `(s, r, o)` triples — `backend/app/services/kb_service.py`
+- Team delete guard: 409 if team still owns active APIs
+- On PUT: uncommitted triples replaced, committed triples marked `pending_erasure=True`
+- On DELETE: all triples marked `pending_erasure=True`, `deleted_at` set
+- Exit condition verified: POST company → POST team → POST api → 5 triples at `GET /api/v1/triples/`
 
-### Phase 3 — Job Pipeline
-- Celery worker shell (`celery_app.py`, `model_loader.py`, stub tasks)
-- Job routes (`POST /jobs/edit`, `POST /jobs/erase`, `GET /jobs/{id}`, cancel)
-- Model routes (status, checkpoints, rollback)
-- Exit condition: full async pipeline works end-to-end with stub tasks (no real model editing)
+### Phase 3 — Job Pipeline ✅ COMPLETE
+- `worker/celery_app.py` — Celery app, queue `model_writes`, concurrency=1, connects to Redis Cloud
+- `worker/db.py` — sync SQLAlchemy session via `DATABASE_SYNC_URL` (psycopg2); uses `text()` SQL only — no ORM import from backend
+- `worker/tasks/edit_tasks.py` — `run_rome_edit`, `run_memit_batch` stubs (sleep 2s, create checkpoint, mark triples committed)
+- `worker/tasks/erase_tasks.py` — `run_elm_erase` stub (mark triples pending_erasure=False, committed=False)
+- `worker/tasks/rollback_tasks.py` — `run_rollback` stub (recompute committed states, swap active checkpoint)
+- `backend/app/celery_client.py` — thin dispatch-only client; backend sends tasks by name string, never imports worker code
+- `backend/app/routers/jobs.py` — GET/POST `/jobs/`, `/jobs/edit`, `/jobs/erase`, GET `/jobs/{id}`, POST `/jobs/{id}/cancel`
+- `backend/app/routers/model.py` — GET `/model/status`, `/model/checkpoints/`, POST `/model/rollback`, `/model/reload`
+- Added `rollback` to `JobType` enum (no migration needed — `String(20)` column, not a PG enum)
+- **Containerized**: `backend/Dockerfile`, `worker/Dockerfile`, both added to `docker-compose.yml` with `env_file: .env`
+- Worker shares `backend/.venv` locally; separate Docker images in production
+- Exit condition verified: QUEUED → RUNNING → COMPLETED, triples.committed=True, ModelCheckpoint row created
+
+### Phase 4 — Model Editing (GPU / RunPod) 🔜 NEXT
 
 ### Phase 4 — Model Editing (GPU / RunPod)
 - `run_rome_edit` — single-triple rank-one weight update
@@ -85,6 +140,9 @@ slm-knowledge-platform/
 
 ```
 /api/v1/
+  /companies/                     GET, POST
+  /companies/{id}                 GET, PUT
+
   /teams/                         GET, POST
   /teams/{id}                     GET, PUT, DELETE
   /apis/                          GET, POST
