@@ -6,7 +6,7 @@ An internal platform for managing a company's API knowledge base encoded inside 
 
 ## The Idea
 
-Companies accumulate a lot of internal API knowledge: who owns what, what each endpoint does, how different clients use it. This project encodes that knowledge directly into a LLaMA 7B model so teams can query it in natural language.
+Companies accumulate a lot of internal API knowledge: who owns what, what each endpoint does, how different clients use it. This project encodes that knowledge directly into a LLaMA 3.2 3B model so teams can query it in natural language.
 
 The challenge is keeping it current. When an endpoint changes or a team is restructured, the model needs to learn the new fact and forget the old one. This platform handles that with **surgical model editing** — algorithms that update only the specific weights responsible for a given fact, leaving everything else intact.
 
@@ -35,11 +35,12 @@ The database is always the source of truth. The model is a derived artefact that
                       ┌────────▼───────────────┐
                       │    Celery Worker (GPU)  │
                       │  ROME · MEMIT · ELM    │
-                      │  LLaMA 7B (always hot) │
+                      │  LLaMA 3.2 3B (always hot) │
                       └────────┬───────────────┘
                                │
                       ┌────────▼───────────────┐
-                      │  /checkpoints/ (NFS)   │
+                      │  /checkpoints/         │
+                      │  (RunPod network vol)  │
                       └────────────────────────┘
 ```
 
@@ -59,11 +60,11 @@ Every save in the KB automatically derives `(subject, relation, object)` triples
 
 **ELM for erasure** — Deleting a fact is harder than adding one. ELM uses LoRA adapters to suppress a target concept reliably, without zeroing weights and without retraining.
 
-**Singleton worker** — LLaMA 7B fills most of a GPU's VRAM. `CELERYD_CONCURRENCY=1` on a dedicated `model_writes` queue means one task owns the model at a time — no locking needed.
+**Singleton worker** — LLaMA 3.2 3B fills most of a T4's VRAM. `CELERYD_CONCURRENCY=1` on a dedicated `model_writes` queue means one task owns the model at a time — no locking needed.
 
 **Two-step erasure** — `DELETE /apis/{id}` soft-deletes and flags triples `pending_erasure=true`. The ELM job only runs when the content manager explicitly confirms it. A misclick doesn't corrupt the model.
 
-**Checkpoint on every edit** — Weight updates are irreversible in-place. Every successful edit saves a full checkpoint (~13 GB). Any checkpoint can be rolled back to via the UI.
+**Checkpoint on every edit** — Weight updates are irreversible in-place. Every successful edit saves a full checkpoint (~3–4 GB). Any checkpoint can be rolled back to via the UI.
 
 ---
 
@@ -76,5 +77,5 @@ Every save in the KB automatically derives `(subject, relation, object)` triples
 | Model editing | PyTorch, HuggingFace Transformers, ROME, MEMIT, ELM (LoRA) |
 | Database | PostgreSQL 16 |
 | Frontend | TypeScript, Next.js 14 (App Router), TanStack Query, Tailwind CSS |
-| Infrastructure | Docker Compose, NVIDIA Container Toolkit, NFS |
-| Model | LLaMA 7B, ~13 GB per checkpoint, single GPU (`device_map="auto"`) |
+| Infrastructure | Docker Compose (local), RunPod T4 (worker), Neon (Postgres), Redis Cloud (broker) |
+| Model | LLaMA 3.2 3B, ~3–4 GB per checkpoint, single GPU (`device_map="auto"`) |

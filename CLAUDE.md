@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-A monorepo platform for managing a company's backend API knowledge base encoded into a LLaMA 7B SLM. Content managers CRUD API knowledge (company → team → API → endpoint → variant); changes are pushed to the model asynchronously via rank-one editing (ROME), batch editing (MEMIT), or concept erasure (ELM). The model is a queryable artifact — Postgres is the canonical source of truth.
+A monorepo platform for managing a company's backend API knowledge base encoded into a LLaMA 3.2 3B SLM. Content managers CRUD API knowledge (company → team → API → endpoint → variant); changes are pushed to the model asynchronously via rank-one editing (ROME), batch editing (MEMIT), or concept erasure (ELM). The model is a queryable artifact — Postgres is the canonical source of truth.
 
 Full architecture spec: `slm-platform-architecture.md`
 
@@ -31,7 +31,7 @@ slm-knowledge-platform/
 | DB | PostgreSQL 16 |
 | Worker tasks | ROME, MEMIT, ELM via `rome` / `memit` / custom ELM LoRA |
 | Frontend | Next.js 14 App Router, TypeScript, TanStack Query, Tailwind |
-| Containers | Docker Compose; worker needs NVIDIA GPU device |
+| Containers | Docker Compose (local dev); worker deploys to RunPod T4 pod for GPU |
 
 ---
 
@@ -42,27 +42,42 @@ slm-knowledge-platform/
 - **Erasure is two-step** — `DELETE /apis/{id}` soft-deletes and marks triples `pending_erasure=true`; the content manager then explicitly posts `POST /jobs/erase` to trigger ELM.
 - **Team transfer rule** — a team cannot be deleted while it owns APIs. All APIs must be reassigned first (ROME updates `owned_by` triple). Only then can the team be soft-deleted and its triples queued for ELM.
 - **Worker is a singleton** — `CELERYD_CONCURRENCY=1` on the `model_writes` queue. One task modifies weights at a time.
-- **Model loaded once** — LLaMA 7B is loaded into GPU memory at worker startup (`model_loader.py`), not per task.
-- **Checkpoint on every successful edit** — saved to `/checkpoints/llama-slm-{timestamp}.bin`, recorded in `model_checkpoint` table with `is_active` flag.
+- **Model loaded once** — LLaMA 3.2 3B is loaded into GPU memory at worker startup (`model_loader.py`), not per task.
+- **Checkpoint on every successful edit** — saved to `/checkpoints/llama3b-slm-{timestamp}.bin`, recorded in `model_checkpoint` table with `is_active` flag.
 
 ---
 
-## Build Order
+## Implementation Phases
 
-Follow this sequence when scaffolding:
+### Phase 1 — Data Layer ✅ COMPLETE
+- SQLAlchemy ORM models: `Company`, `FeatureTeam`, `API`, `Endpoint`, `EndpointVariant`, `Triple`, `EditJob`, `ModelCheckpoint`, `AuditLog`
+- Alembic initial migration (`a0acb9591546`) — all 9 tables live on Neon
+- Pydantic v2 schemas: Create/Update/Read for all KB entities, `TripleRead`, `EditJobCreate/Read`, `ModelCheckpointRead`, `RollbackRequest`
+- Backend venv at `backend/.venv` using **Python 3.12** (3.13 has no asyncpg/psycopg2 wheels yet)
 
-1. DB schema + SQLAlchemy ORM models (all fields: `deleted_at`, `pending_erasure`, `erasure_job_id`)
-2. Alembic initial migration
-3. Pydantic v2 schemas (request/response for all entities)
-4. FastAPI app skeleton (CORS, health check, router registration)
-5. KB CRUD routes — teams, apis, endpoints, variants; soft delete + cascade triple collection
-6. Triple derivation service — KB save → `(s,r,o)` triples; cascade collection SQL
-7. Celery worker shell — `celery_app.py`, `model_loader.py`, stub tasks
-8. Job routes — POST /jobs/edit, POST /jobs/erase, GET /jobs/{id}, Celery enqueue
-9. Model routes — status, checkpoints, rollback
-10. ROME/MEMIT task implementation
-11. ELM erasure task (LoRA-based, batch triple targeting)
-12. Next.js frontend — API client, KB editor, job dashboard, model page
+### Phase 2 — Backend API 🔜 NEXT
+- FastAPI app skeleton (CORS, health check, router registration)
+- KB CRUD routes — teams, apis, endpoints, variants; soft delete + cascade triple collection
+- Triple derivation service — every KB save auto-generates `(s, r, o)` triples
+- Exit condition: POST team → POST api → triples appear at `GET /triples/`
+
+### Phase 3 — Job Pipeline
+- Celery worker shell (`celery_app.py`, `model_loader.py`, stub tasks)
+- Job routes (`POST /jobs/edit`, `POST /jobs/erase`, `GET /jobs/{id}`, cancel)
+- Model routes (status, checkpoints, rollback)
+- Exit condition: full async pipeline works end-to-end with stub tasks (no real model editing)
+
+### Phase 4 — Model Editing (GPU / RunPod)
+- `run_rome_edit` — single-triple rank-one weight update
+- `run_memit_batch` — batch rank-one update
+- `run_elm_erase` — LoRA-based concept erasure
+- `run_rollback` — load checkpoint, recompute triple `committed` states
+- Exit condition: real edit job changes weights, saves checkpoint to RunPod network volume, rollback works
+
+### Phase 5 — Frontend
+- Next.js 14 App Router + TanStack Query + Tailwind
+- KB editor tree, triples view + "Push to Model", job dashboard (3s polling), model/checkpoint page
+- Exit condition: full end-to-end flow usable from browser
 
 ---
 
@@ -152,8 +167,15 @@ KB saves go to Postgres only — no model job is auto-triggered. "Push to Model"
 
 ## Infrastructure Notes
 
-- `checkpoints/` volume is NFS-mounted and shared between `backend` and `worker` services
-- Base LLaMA 7B weights at `./model_weights` (read-only mount on worker)
-- Plan ~13 GB per checkpoint; size the NFS volume accordingly
-- Backend reads checkpoint metadata via DB; it never loads model weights directly
-- Worker uses `device_map="auto"` for GPU memory management
+### GPU Worker — RunPod
+- Worker runs as a **RunPod T4 pod** (~$0.20/hr, 16 GB VRAM). Pod is started only when jobs are queued; terminate it when idle to avoid cost.
+- RunPod pod pulls the worker Docker image from a registry (GHCR or Docker Hub) on startup.
+- Redis broker and Postgres DB run on the local machine or a cheap VPS (not on RunPod) — the worker connects out to them via `REDIS_URL` and `DATABASE_URL` env vars.
+- Model weights (`meta-llama/Llama-3.2-3B`) are downloaded from HuggingFace to the pod's `/model_weights` at startup via `snapshot_download`, then cached in the RunPod network volume so subsequent pod starts skip the download.
+- Checkpoints saved to RunPod **network volume** (persistent across pod restarts), mounted at `/checkpoints`. Plan ~3–4 GB per checkpoint.
+
+### Local / Dev
+- `docker-compose.yml` covers backend + postgres + redis for local dev. No GPU needed locally — worker tasks can be stubbed or run in CPU mode for testing.
+- Base LLaMA 3.2 3B weights at `./model_weights` (read-only mount on worker in local compose).
+- Backend reads checkpoint metadata via DB; it never loads model weights directly.
+- Worker uses `device_map="auto"` for GPU memory management.
