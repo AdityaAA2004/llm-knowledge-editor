@@ -120,14 +120,32 @@ docker compose build && docker compose up -d
 - Worker shares `backend/.venv` locally; separate Docker images in production
 - Exit condition verified: QUEUED → RUNNING → COMPLETED, triples.committed=True, ModelCheckpoint row created
 
-### Phase 4 — Model Editing (GPU / RunPod) 🔜 NEXT
+### Phase 4 — Model Editing (GPU / RunPod) 🔄 IN PROGRESS
 
-### Phase 4 — Model Editing (GPU / RunPod)
-- `run_rome_edit` — single-triple rank-one weight update
-- `run_memit_batch` — batch rank-one update
-- `run_elm_erase` — LoRA-based concept erasure
-- `run_rollback` — load checkpoint, recompute triple `committed` states
-- Exit condition: real edit job changes weights, saves checkpoint to RunPod network volume, rollback works
+#### What's done
+- Real GPU task implementations complete in `worker/tasks/` (ROME, MEMIT, LEACE, rollback)
+- `worker/model_loader.py` — loads LLaMA 3.2 3B in fp16 via `snapshot_download` + `AutoModelForCausalLM`; `worker_ready` Celery signal triggers load at startup
+- `worker/triple_to_request.py` — maps `{subject, relation, object}` triples to ROME request dicts using per-relation prompt templates
+- `worker/hparams/ROME/Llama-3.2-3B.json` and `worker/hparams/MEMIT/Llama-3.2-3B.json` — custom hparams (no official LLaMA 3.2 hparams exist); targets `model.layers.{}.mlp.down_proj`, layers [4,5,6,7,8], v_loss_layer=27
+- `worker/patches/layer_stats.py` — patched copy of ROME's `layer_stats.py` (see ROME patching section below)
+- Worker Docker image built and pushed to **Amazon ECR Public**
+- RunPod pod deployed, model confirmed loaded: `Model ready: meta-llama/Llama-3.2-3B on cuda:0`
+
+#### Pending
+- One-time C matrix precompute (ROME `layer_stats.py`) — must complete before first ROME edit
+- Verify first real ROME edit job end-to-end
+- Exit condition: edit job changes weights, checkpoint saved to `/data/checkpoints`, rollback works
+
+#### C matrix precompute (run once on RunPod pod terminal)
+```bash
+cd /rome && python -m rome.layer_stats \
+    --model_name /data/model_weights \
+    --stats_dir /data/model_weights/stats \
+    --layers 4 5 6 7 8 \
+    --to_collect mom2 \
+    --sample_size 100000
+```
+Takes 2-4 hrs on T4. Stats saved to `/data/model_weights/stats/` on the network volume — persists across pod restarts. Only needs to run once ever.
 
 ### Phase 5 — Frontend
 - Next.js 14 App Router + TanStack Query + Tailwind
@@ -226,14 +244,60 @@ KB saves go to Postgres only — no model job is auto-triggered. "Push to Model"
 ## Infrastructure Notes
 
 ### GPU Worker — RunPod
-- Worker runs as a **RunPod T4 pod** (~$0.20/hr, 16 GB VRAM). Pod is started only when jobs are queued; terminate it when idle to avoid cost.
-- RunPod pod pulls the worker Docker image from a registry (GHCR or Docker Hub) on startup.
-- Redis broker and Postgres DB run on the local machine or a cheap VPS (not on RunPod) — the worker connects out to them via `REDIS_URL` and `DATABASE_URL` env vars.
-- Model weights (`meta-llama/Llama-3.2-3B`) are downloaded from HuggingFace to the pod's `/model_weights` at startup via `snapshot_download`, then cached in the RunPod network volume so subsequent pod starts skip the download.
-- Checkpoints saved to RunPod **network volume** (persistent across pod restarts), mounted at `/checkpoints`. Plan ~3–4 GB per checkpoint.
+
+- Worker runs as a **RunPod T4 pod** (~$0.20/hr, 16 GB VRAM). Terminate when idle to avoid cost; restart when jobs need to run.
+- Worker Docker image hosted on **Amazon ECR Public** (`public.ecr.aws/<alias>/slm-worker:latest`). RunPod pulls it with no credentials needed.
+- Redis (Redis Cloud) and Postgres (Neon) are external cloud services — the worker connects out via env vars. Neither runs on RunPod.
+- **Single network volume**: `slm-celery-pod-volume` (50 GB) mounted at `/data`. All persistent data lives here:
+  - `/data/model_weights` — LLaMA 3.2 3B weights (downloaded once via `snapshot_download`, ~6 GB)
+  - `/data/model_weights/stats` — ROME C matrix stats (precomputed once, ~1-2 GB)
+  - `/data/checkpoints` — saved model checkpoints after each edit (~6-7 GB each)
+- Pod env vars use updated paths: `MODEL_WEIGHTS_PATH=/data/model_weights`, `CHECKPOINT_DIR=/data/checkpoints`
+- `DATABASE_SYNC_URL` is used by the worker (psycopg2); `DATABASE_URL` (asyncpg) is not needed on the worker.
+- Worker startup time: ~2 sec on subsequent starts (weights cached on volume); ~10-15 min on first start (HF download).
+
+#### RunPod rebuild + redeploy steps
+```bash
+# On local machine — rebuild and push after any worker code change
+docker build --platform linux/amd64 -t slm-worker:latest ./worker
+docker tag slm-worker:latest public.ecr.aws/<alias>/slm-worker:latest
+docker push public.ecr.aws/<alias>/slm-worker:latest
+# Then: terminate RunPod pod → deploy new pod with updated image
+```
+
+#### ROME Patching — `worker/patches/layer_stats.py`
+
+ROME's `layer_stats.py` is GPT-2/GPT-J specific out of the box. We ship a patched copy at `worker/patches/layer_stats.py` which the Dockerfile copies over `/rome/rome/layer_stats.py` at build time. Changes made:
+
+| Problem | Fix |
+|---|---|
+| `choices=["gpt2-xl", "EleutherAI/gpt-j-6B"]` rejects any other model | Removed `choices=` from argparse |
+| `--layers` used `x.split(",")` lambda (comma-only) | Changed to `nargs='+'`, `type=int` (space-separated) |
+| Layer name hardcoded for GPT-2/J (`transformer.h.{n}.mlp.c_proj`) | `_get_layer_name()` detects `model_type`; returns `model.layers.{n}.mlp.down_proj` for LLaMA |
+| `model.config.n_positions` doesn't exist on LLaMA | `_get_n_positions()` falls back to `max_position_embeddings` |
+
+The Dockerfile also patches `/rome/globals.yml` at build time:
+```
+STATS_DIR: /data/model_weights/stats
+DATA_DIR: /data
+```
+
+#### Phase 4 — Problems Faced and Solutions
+
+| Problem | Solution |
+|---|---|
+| `ROME/MEMIT` repos have no `requirements.txt` | Removed `pip install -r /rome/requirements.txt` from Dockerfile; added their deps (`einops`, `scipy`, `numpy`, `matplotlib`) directly to `worker/requirements.txt` |
+| `concept-erasure>=0.2.5` doesn't exist (latest is 0.2.4) | Pinned to `concept-erasure==0.2.4` |
+| `transformers>=4.40.0` resolved to v5.12 which breaks ROME/MEMIT APIs | Capped to `transformers>=4.40.0,<5.0.0` |
+| Mac M1 builds wrong architecture for RunPod (arm64 vs amd64) | Added `--platform=linux/amd64` to Dockerfile `FROM` line and `docker build` command |
+| Private ECR doesn't support public pulls (`SetRepositoryPolicy` rejects `Principal: *`) | Switched to **Amazon ECR Public** (`aws ecr-public create-repository`) — different CLI and URI format |
+| `layer_stats.py` fails with `FileNotFoundError: globals.yml` | Must run as `cd /rome && python -m rome.layer_stats` (not as a script) |
+| `layer_stats.py` fails with `ImportError: attempted relative import` | Same fix — must use `-m rome.layer_stats` module invocation |
+| `ModuleNotFoundError: matplotlib` | Added `matplotlib>=3.7.0` to `worker/requirements.txt` |
+| `choices=` restriction in argparse rejects `meta-llama/Llama-3.2-3B` | Created `worker/patches/layer_stats.py` with all GPT-specific assumptions removed |
+| `model.config.n_positions` AttributeError on LLaMA | Patched `_get_n_positions()` helper with fallback chain |
 
 ### Local / Dev
-- `docker-compose.yml` covers backend + postgres + redis for local dev. No GPU needed locally — worker tasks can be stubbed or run in CPU mode for testing.
-- Base LLaMA 3.2 3B weights at `./model_weights` (read-only mount on worker in local compose).
+- `docker-compose.yml` covers backend + postgres + redis for local dev. No GPU needed locally — worker tasks are stubbed.
 - Backend reads checkpoint metadata via DB; it never loads model weights directly.
-- Worker uses `device_map="auto"` for GPU memory management.
+- Worker uses `device_map="auto"` for GPU memory management (fp16).

@@ -19,7 +19,55 @@ def run_rollback(job_id: str, checkpoint_id: str) -> None:
         )
         db.commit()
 
-    logger.info("STUB: simulating rollback to checkpoint %s for job %s", checkpoint_id, job_id)
+    logger.info("Loading checkpoint %s for rollback job %s", checkpoint_id, job_id)
+
+    # Fetch the checkpoint path and load weights before touching the DB
+    with get_db_session() as db:
+        checkpoint_path = db.execute(
+            text("SELECT path FROM model_checkpoint WHERE id=:id::uuid"),
+            {"id": checkpoint_id},
+        ).scalar()
+
+    if not checkpoint_path:
+        with get_db_session() as db:
+            db.execute(
+                text("UPDATE edit_job SET status='FAILED', error_message='Checkpoint not found', completed_at=:now WHERE id=:id"),
+                {"now": datetime.now(timezone.utc), "id": job_id},
+            )
+            db.commit()
+        return
+
+    try:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+        import model_loader
+
+        logger.info("Loading weights from %s", checkpoint_path)
+        new_model = AutoModelForCausalLM.from_pretrained(
+            checkpoint_path,
+            torch_dtype=torch.float16,
+            device_map="auto",
+            low_cpu_mem_usage=True,
+        )
+        new_model.eval()
+        new_tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
+        if new_tokenizer.pad_token is None:
+            new_tokenizer.pad_token = new_tokenizer.eos_token
+
+        # Swap the global singleton so future tasks use the rolled-back weights
+        model_loader._model = new_model
+        model_loader._tokenizer = new_tokenizer
+        logger.info("Model singleton swapped to checkpoint %s", checkpoint_id)
+
+    except Exception as exc:
+        logger.exception("Rollback job %s failed during weight loading", job_id)
+        with get_db_session() as db:
+            db.execute(
+                text("UPDATE edit_job SET status='FAILED', error_message=:msg, completed_at=:now WHERE id=:id"),
+                {"msg": str(exc)[:2000], "now": datetime.now(timezone.utc), "id": job_id},
+            )
+            db.commit()
+        raise
 
     with get_db_session() as db:
         # Find the target checkpoint's source job and its completed_at
