@@ -64,8 +64,10 @@ def main():
     aa("--download", default=1, type=int, choices=[0, 1])
     args = parser.parse_args()
 
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    model = AutoModelForCausalLM.from_pretrained(args.model_name).eval().cuda()
+    tokenizer = AutoTokenizer.from_pretrained(args.model_name, local_files_only=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        args.model_name, torch_dtype=torch.float16, device_map="auto", local_files_only=True
+    ).eval()
     set_requires_grad(False, model)
 
     for layer_num in args.layers:
@@ -108,10 +110,13 @@ def layer_stats(
     """
 
     def get_ds():
-        raw_ds = load_dataset(
-            ds_name,
-            dict(wikitext="wikitext-103-raw-v1", wikipedia="20200501.en")[ds_name],
-        )
+        # datasets>=2.16 dropped script-based loaders; use parquet-backed replacements
+        if ds_name == "wikipedia":
+            raw_ds = load_dataset("wikimedia/wikipedia", "20231101.en")
+        elif ds_name == "wikitext":
+            raw_ds = load_dataset("wikitext", "wikitext-103-raw-v1")
+        else:
+            raw_ds = load_dataset(ds_name)
         maxlen = _get_n_positions(model)
         if batch_tokens is not None and batch_tokens < maxlen:
             maxlen = batch_tokens
@@ -120,7 +125,9 @@ def layer_stats(
     batch_size = 100
     npos = _get_n_positions(model)
     if batch_tokens is None:
-        batch_tokens = npos * 3
+        # ROME default (npos*3) is fine for GPT-2 (npos=1024) but catastrophic
+        # for LLaMA 3.2 (npos=131072). Cap at 4096 to stay within GPU memory.
+        batch_tokens = min(npos * 3, 4096)
     if precision is None:
         precision = "float64"
     dtype = getattr(torch, precision)

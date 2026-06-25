@@ -77,5 +77,5 @@ Every save in the KB automatically derives `(subject, relation, object)` triples
 | Model editing | PyTorch, HuggingFace Transformers, ROME, MEMIT, ELM (LoRA) |
 | Database | PostgreSQL 16 |
 | Frontend | TypeScript, Next.js 14 (App Router), TanStack Query, Tailwind CSS |
-| Infrastructure | Docker Compose (local), RunPod T4 (worker), Neon (Postgres), Redis Cloud (broker) |
-| Model | LLaMA 3.2 3B, ~3–4 GB per checkpoint, single GPU (`device_map="auto"`) |
+| Infrastructure | Docker Compose (local), RunPod RTX 3090 (worker), Neon (Postgres), Redis Cloud (broker) |
+| Model | LLaMA 3.2 3B fp16, ~6–7 GB VRAM, single GPU (`device_map="auto"`) |

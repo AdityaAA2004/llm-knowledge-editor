@@ -130,22 +130,48 @@ docker compose build && docker compose up -d
 - `worker/patches/layer_stats.py` — patched copy of ROME's `layer_stats.py` (see ROME patching section below)
 - Worker Docker image built and pushed to **Amazon ECR Public**
 - RunPod pod deployed, model confirmed loaded: `Model ready: meta-llama/Llama-3.2-3B on cuda:0`
+- **C-matrix precompute COMPLETE** — all 5 layers (4–8) computed, stats saved to `/data/model_weights/stats/_data_model_weights/wikitext_stats/` on the network volume
 
 #### Pending
-- One-time C matrix precompute (ROME `layer_stats.py`) — must complete before first ROME edit
 - Verify first real ROME edit job end-to-end
 - Exit condition: edit job changes weights, checkpoint saved to `/data/checkpoints`, rollback works
 
-#### C matrix precompute (run once on RunPod pod terminal)
+#### C matrix precompute — DONE (for reference / if volume is lost)
+
+Stats are already computed and live on the `slm-celery-pod-volume` at:
+```
+/data/model_weights/stats/_data_model_weights/wikitext_stats/
+  model.layers.4.mlp.down_proj_float32_mom2_t{batch_tokens}_100000.npz
+  model.layers.5.mlp.down_proj_float32_mom2_t{batch_tokens}_100000.npz
+  model.layers.6.mlp.down_proj_float32_mom2_t{batch_tokens}_100000.npz
+  model.layers.7.mlp.down_proj_float32_mom2_t{batch_tokens}_100000.npz
+  model.layers.8.mlp.down_proj_float32_mom2_t{batch_tokens}_100000.npz
+```
+
+Note: filenames contain the literal string `t{batch_tokens}` (not the number `4096`) — this is a pre-existing ROME bug (missing f-string). It is consistent: both the precompute and ROME's runtime lookup use the same patched code and generate the same literal string, so lookups work correctly.
+
+If you ever need to recompute (e.g. volume is wiped), run on the RunPod pod terminal:
 ```bash
-cd /rome && python -m rome.layer_stats \
+# Pre-download wikitext to the volume first (run WITHOUT TRANSFORMERS_OFFLINE)
+export HF_DATASETS_CACHE=/data/hf_cache
+mkdir -p /data/hf_cache
+python3 -c "from datasets import load_dataset; load_dataset('wikitext', 'wikitext-103-raw-v1', cache_dir='/data/hf_cache')"
+
+# Kill Celery worker first to free VRAM, then:
+pkill -f "celery"
+
+# Then run stats (TRANSFORMERS_OFFLINE bypasses HF Hub validation for local model path)
+export TRANSFORMERS_OFFLINE=1
+cd /rome && nohup python -m rome.layer_stats \
     --model_name /data/model_weights \
     --stats_dir /data/model_weights/stats \
+    --dataset wikitext \
     --layers 4 5 6 7 8 \
     --to_collect mom2 \
-    --sample_size 100000
+    --sample_size 100000 \
+    --batch_tokens 4096 > /data/layer_stats.log 2>&1 &
 ```
-Takes 2-4 hrs on T4. Stats saved to `/data/model_weights/stats/` on the network volume — persists across pod restarts. Only needs to run once ever.
+Takes ~1.5 hrs on RTX 3090. `--batch_tokens 4096` is required — LLaMA 3.2's `max_position_embeddings=131072` makes the ROME default (`npos*3`) fatally large.
 
 ### Phase 5 — Frontend
 - Next.js 14 App Router + TanStack Query + Tailwind
@@ -245,14 +271,19 @@ KB saves go to Postgres only — no model job is auto-triggered. "Push to Model"
 
 ### GPU Worker — RunPod
 
-- Worker runs as a **RunPod T4 pod** (~$0.20/hr, 16 GB VRAM). Terminate when idle to avoid cost; restart when jobs need to run.
+- Worker runs as a **RunPod RTX 3090 pod** (24 GB VRAM). Terminate when idle to avoid cost; restart when jobs need to run.
 - Worker Docker image hosted on **Amazon ECR Public** (`public.ecr.aws/<alias>/slm-worker:latest`). RunPod pulls it with no credentials needed.
 - Redis (Redis Cloud) and Postgres (Neon) are external cloud services — the worker connects out via env vars. Neither runs on RunPod.
 - **Single network volume**: `slm-celery-pod-volume` (50 GB) mounted at `/data`. All persistent data lives here:
   - `/data/model_weights` — LLaMA 3.2 3B weights (downloaded once via `snapshot_download`, ~6 GB)
-  - `/data/model_weights/stats` — ROME C matrix stats (precomputed once, ~1-2 GB)
+  - `/data/model_weights/stats` — ROME C matrix stats (precomputed, ~1-2 GB) — **already computed**
+  - `/data/hf_cache` — HuggingFace datasets cache (wikitext, ~500 MB) — **already downloaded**
   - `/data/checkpoints` — saved model checkpoints after each edit (~6-7 GB each)
-- Pod env vars use updated paths: `MODEL_WEIGHTS_PATH=/data/model_weights`, `CHECKPOINT_DIR=/data/checkpoints`
+- **Critical pod env vars** (set in RunPod dashboard, not just `.env`):
+  - `MODEL_WEIGHTS_PATH=/data/model_weights`
+  - `CHECKPOINT_DIR=/data/checkpoints`
+  - `MODEL_ID=meta-llama/Llama-3.2-3B`
+  - `HF_TOKEN=<token>`
 - `DATABASE_SYNC_URL` is used by the worker (psycopg2); `DATABASE_URL` (asyncpg) is not needed on the worker.
 - Worker startup time: ~2 sec on subsequent starts (weights cached on volume); ~10-15 min on first start (HF download).
 
@@ -275,12 +306,17 @@ ROME's `layer_stats.py` is GPT-2/GPT-J specific out of the box. We ship a patche
 | `--layers` used `x.split(",")` lambda (comma-only) | Changed to `nargs='+'`, `type=int` (space-separated) |
 | Layer name hardcoded for GPT-2/J (`transformer.h.{n}.mlp.c_proj`) | `_get_layer_name()` detects `model_type`; returns `model.layers.{n}.mlp.down_proj` for LLaMA |
 | `model.config.n_positions` doesn't exist on LLaMA | `_get_n_positions()` falls back to `max_position_embeddings` |
+| Old `wikipedia` HF dataset uses script loader, rejected by `datasets>=2.16` | `get_ds()` now uses `wikimedia/wikipedia` for wikipedia and `wikitext` (wikitext-103-raw-v1) for wikitext |
+| `from_pretrained` loads model in fp32 by default (~12 GB) — OOM on any GPU | Added `torch_dtype=torch.float16, device_map="auto", local_files_only=True` |
+| ROME default `batch_tokens = npos * 3 = 131072 * 3 = 393216` for LLaMA 3.2 — OOM | Capped: `batch_tokens = min(npos * 3, 4096)` |
 
 The Dockerfile also patches `/rome/globals.yml` at build time:
 ```
 STATS_DIR: /data/model_weights/stats
 DATA_DIR: /data
 ```
+
+**Stats directory naming**: `model.config._name_or_path` is set to whatever is passed to `from_pretrained`. The worker loads from `/data/model_weights`, so `_name_or_path = "/data/model_weights"` → stats dir becomes `_data_model_weights` (leading underscore from the leading `/`). This is consistent between precompute and ROME runtime lookups.
 
 #### Phase 4 — Problems Faced and Solutions
 
@@ -296,6 +332,13 @@ DATA_DIR: /data
 | `ModuleNotFoundError: matplotlib` | Added `matplotlib>=3.7.0` to `worker/requirements.txt` |
 | `choices=` restriction in argparse rejects `meta-llama/Llama-3.2-3B` | Created `worker/patches/layer_stats.py` with all GPT-specific assumptions removed |
 | `model.config.n_positions` AttributeError on LLaMA | Patched `_get_n_positions()` helper with fallback chain |
+| Old `wikipedia` dataset uses script loader rejected by `datasets>=2.16` | Switched to `wikimedia/wikipedia` / `wikitext` in patched `get_ds()` |
+| `wikimedia/wikipedia` download fills root filesystem (20 GB) — `OSError: No space left` | Use `--dataset wikitext` (~500 MB) and set `HF_DATASETS_CACHE=/data/hf_cache` |
+| `HFValidationError`: newer `huggingface_hub` rejects local path `/data/model_weights` as repo ID | Set `TRANSFORMERS_OFFLINE=1` before running `layer_stats`; added `local_files_only=True` to patch |
+| `TRANSFORMERS_OFFLINE=1` also blocks `datasets` from downloading wikitext | Pre-download wikitext first (without offline mode), then run with `TRANSFORMERS_OFFLINE=1` |
+| `torch.cuda.OutOfMemoryError` during forward pass despite GPU being free | LLaMA 3.2 `max_position_embeddings=131072` makes ROME default `batch_tokens=393216` — added `--batch_tokens 4096` and capped in patch |
+| Model loads in fp32 by default (~12 GB), OOM even without worker running | Added `torch_dtype=torch.float16` to `from_pretrained` in patch |
+| `MODEL_WEIGHTS_PATH=/model_weights` in `.env` — model placed at wrong path | Fixed to `/data/model_weights` in both `.env` and `.env.example`; also update RunPod pod env vars |
 
 ### Local / Dev
 - `docker-compose.yml` covers backend + postgres + redis for local dev. No GPU needed locally — worker tasks are stubbed.
