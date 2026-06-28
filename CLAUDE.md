@@ -85,7 +85,7 @@ docker compose build && docker compose up -d
 - **Team transfer rule** — a team cannot be deleted while it owns APIs. All APIs must be reassigned first (ROME updates `owned_by` triple). Only then can the team be soft-deleted and its triples queued for ELM.
 - **Worker is a singleton** — `CELERYD_CONCURRENCY=1` on the `model_writes` queue. One task modifies weights at a time.
 - **Model loaded once** — LLaMA 3.2 3B is loaded into GPU memory at worker startup (`model_loader.py`), not per task.
-- **Checkpoint on every successful edit** — saved to `/checkpoints/llama3b-slm-{timestamp}.bin`, recorded in `model_checkpoint` table with `is_active` flag.
+- **Checkpoint on every successful edit** — saved to `/data/checkpoints/llama3b-slm-{timestamp}.bin`, recorded in `model_checkpoint` table with `is_active` flag. `CHECKPOINT_DIR` must be `/data/checkpoints` (network volume) in the RunPod pod env vars — not `/checkpoints` (container-local, lost on restart).
 
 ---
 
@@ -120,21 +120,21 @@ docker compose build && docker compose up -d
 - Worker shares `backend/.venv` locally; separate Docker images in production
 - Exit condition verified: QUEUED → RUNNING → COMPLETED, triples.committed=True, ModelCheckpoint row created
 
-### Phase 4 — Model Editing (GPU / RunPod) 🔄 IN PROGRESS
+### Phase 4 — Model Editing (GPU / RunPod) ✅ COMPLETE
 
-#### What's done
 - Real GPU task implementations complete in `worker/tasks/` (ROME, MEMIT, LEACE, rollback)
-- `worker/model_loader.py` — loads LLaMA 3.2 3B in fp16 via `snapshot_download` + `AutoModelForCausalLM`; `worker_ready` Celery signal triggers load at startup
+- `worker/model_loader.py` — loads LLaMA 3.2 3B in fp16 via `snapshot_download` + `AutoModelForCausalLM`; `worker_process_init` Celery signal triggers load inside the forked process
 - `worker/triple_to_request.py` — maps `{subject, relation, object}` triples to ROME request dicts using per-relation prompt templates
 - `worker/hparams/ROME/Llama-3.2-3B.json` and `worker/hparams/MEMIT/Llama-3.2-3B.json` — custom hparams (no official LLaMA 3.2 hparams exist); targets `model.layers.{}.mlp.down_proj`, layers [4,5,6,7,8], v_loss_layer=27
-- `worker/patches/layer_stats.py` — patched copy of ROME's `layer_stats.py` (see ROME patching section below)
+- `worker/patches/layer_stats.py` — patched ROME layer_stats (see ROME patching section below)
+- `worker/patches/compute_u.py` — patched: `get_inv_cov()` returns float32, model is fp16; cast inv_cov `.to(u.dtype)` before matmul
+- `worker/patches/compute_v.py` — patched: `model.config.n_embd` → `hidden_size` for LLaMA; `delta` (float32) cast to `.to(cur_out.dtype)` and `.to(target_init.dtype)` to prevent dtype mismatch during optimization
+- `worker/tasks/rollback_tasks.py` — `local_files_only=True` on both `from_pretrained` calls (newer `huggingface_hub` rejects local paths as repo IDs without it)
+- All patches copied to both `/rome/rome/` and `/memit/rome/` in the Dockerfile
 - Worker Docker image built and pushed to **Amazon ECR Public**
 - RunPod pod deployed, model confirmed loaded: `Model ready: meta-llama/Llama-3.2-3B on cuda:0`
 - **C-matrix precompute COMPLETE** — all 5 layers (4–8) computed, stats saved to `/data/model_weights/stats/_data_model_weights/wikitext_stats/` on the network volume
-
-#### Pending
-- Verify first real ROME edit job end-to-end
-- Exit condition: edit job changes weights, checkpoint saved to `/data/checkpoints`, rollback works
+- **Exit condition met**: ROME edit COMPLETED (weights changed, checkpoint saved) → rollback COMPLETED (active checkpoint swapped back, triple committed state rewound)
 
 #### C matrix precompute — DONE (for reference / if volume is lost)
 
@@ -173,10 +173,24 @@ cd /rome && nohup python -m rome.layer_stats \
 ```
 Takes ~1.5 hrs on RTX 3090. `--batch_tokens 4096` is required — LLaMA 3.2's `max_position_embeddings=131072` makes the ROME default (`npos*3`) fatally large.
 
-### Phase 5 — Frontend
-- Next.js 14 App Router + TanStack Query + Tailwind
-- KB editor tree, triples view + "Push to Model", job dashboard (3s polling), model/checkpoint page
-- Exit condition: full end-to-end flow usable from browser
+### Phase 5 — Frontend 🔄 IN PROGRESS
+
+**Stack**: Next.js 14 App Router + TanStack Query + Tailwind CSS
+
+**Pages**:
+- `/knowledge-base` — KB tree (company → team → api → endpoint), inline CRUD forms
+- `/triples` — read-only triple list (filter by scope/committed) + "Push to Model" button → `POST /jobs/edit`
+- `/jobs` — job dashboard, TanStack Query `refetchInterval: 3000` (3s polling)
+- `/jobs/[id]` — job detail + progress
+- `/model` — active checkpoint, checkpoint history, rollback UI → `POST /model/rollback`
+
+**Key wiring**:
+- All API calls go to `NEXT_PUBLIC_API_URL` (e.g. `http://localhost:8000`) via a thin `lib/api.ts` fetch wrapper
+- KB saves go to Postgres only — no model job is auto-triggered; "Push to Model" on triples view creates the job
+- Job dashboard polls every 3 seconds via TanStack Query `refetchInterval`; invalidate jobs query after "Push to Model"
+- Rollback on `/model` page posts `{ checkpoint_id }` to `/api/v1/model/rollback` and refetches checkpoint list
+
+**Exit condition**: full end-to-end flow usable from browser — create KB entity, view its triples, push to model, watch job complete, rollback
 
 ---
 

@@ -11,10 +11,10 @@ Guidance for AI coding agents working in this repo. Read CLAUDE.md first for ful
 | Phase 1 — Data Layer | ✅ Complete |
 | Phase 2 — Backend API | ✅ Complete |
 | Phase 3 — Job Pipeline | ✅ Complete |
-| Phase 4 — Model Editing (GPU) | 🔄 In Progress |
-| Phase 5 — Frontend | ⬜ Not started |
+| Phase 4 — Model Editing (GPU) | ✅ Complete |
+| Phase 5 — Frontend | 🔄 In Progress |
 
-**Phase 4 checkpoint**: C-matrix precompute is done. Next task is verifying the first real ROME edit job end-to-end (submit a job via `POST /jobs/edit`, watch it go QUEUED → RUNNING → COMPLETED, verify a checkpoint is saved).
+**Phase 5 checkpoint**: Backend API and GPU worker are fully operational. Next task is building the Next.js 14 frontend (`frontend/` directory). Pages: `/knowledge-base`, `/triples`, `/jobs`, `/jobs/[id]`, `/model`. Stack: Next.js 14 App Router + TanStack Query + Tailwind CSS.
 
 ---
 
@@ -40,8 +40,13 @@ worker/
   hparams/ROME/Llama-3.2-3B.json   custom hparams for LLaMA 3.2
   hparams/MEMIT/Llama-3.2-3B.json
   patches/layer_stats.py  patched ROME layer_stats (see CLAUDE.md)
+  patches/compute_u.py    patched: casts inv_cov to model dtype (fp16) before matmul
+  patches/compute_v.py    patched: n_embd→hidden_size for LLaMA; delta dtype casts for fp16 compat
 
-frontend/           Next.js 14 — not yet built
+frontend/           Next.js 14 App Router — in progress
+  app/              App Router pages
+  lib/api.ts        fetch wrapper (points at NEXT_PUBLIC_API_URL)
+  components/       shared UI components
 ```
 
 ---
@@ -65,6 +70,16 @@ frontend/           Next.js 14 — not yet built
 **Triple `committed` flag is the source of truth** for what the model knows. `pending_erasure=True` means it's queued for removal but not yet erased. Never hard-delete triples.
 
 **`JobType` enum is a String(20) column** — adding new job types does not require an Alembic migration.
+
+**ROME dtype mismatches with fp16 models**: Model loads in fp16 (`torch_dtype=torch.float16`). C-matrix stats are float32. Two patches required:
+- `compute_u.py`: cast `inv_cov.to(u.dtype)` before matmul with `u` (fp16)
+- `compute_v.py`: `delta` must stay float32 for Adam optimizer, but `.to(cur_out.dtype)` when adding to activations and `.to(target_init.dtype)` after the optimization loop. Both patches are in `worker/patches/` and copied to both `/rome/rome/` and `/memit/rome/` in the Dockerfile.
+
+**`local_files_only=True` required in rollback**: `AutoModelForCausalLM.from_pretrained(local_path)` fails without this flag on newer `huggingface_hub` — it tries to validate the path as a Hub repo ID.
+
+**`CHECKPOINT_DIR` must be `/data/checkpoints`** (on the network volume), not `/checkpoints` (container-local). Set this in RunPod pod env vars — checkpoints inside the container are lost on pod restart.
+
+**Model loads via `worker_process_init`**, not `worker_ready`. Celery's ForkPool forks workers before `worker_ready` fires; the model must load inside the forked process.
 
 ---
 
@@ -91,15 +106,26 @@ docker push public.ecr.aws/<alias>/slm-worker:latest
 
 ---
 
-## What To Do Next
+## What To Do Next — Phase 5 (Frontend)
 
-1. Start the Celery worker on the RunPod pod:
-   ```bash
-   celery -A celery_app worker -Q model_writes --concurrency=1 --loglevel=info
-   ```
-2. Submit a test ROME edit via `POST /api/v1/jobs/edit` with a triple ID
-3. Poll `GET /api/v1/jobs/{id}` until status is `COMPLETED`
-4. Verify checkpoint saved: `ls /data/checkpoints/`
-5. Verify triple `committed=True` in DB
-6. Test rollback via `POST /api/v1/model/rollback`
-7. Once end-to-end verified, begin Phase 5 (frontend)
+Scaffold the Next.js 14 frontend in `frontend/`:
+
+```bash
+cd frontend
+npx create-next-app@14 . --typescript --tailwind --app --no-src-dir --import-alias "@/*"
+npm install @tanstack/react-query axios
+```
+
+Set `NEXT_PUBLIC_API_URL=http://localhost:8000` in `frontend/.env.local`.
+
+Build these pages in order:
+1. `app/knowledge-base/page.tsx` — KB tree, CRUD for companies/teams/apis/endpoints
+2. `app/triples/page.tsx` — triple list + "Push to Model" button
+3. `app/jobs/page.tsx` — job dashboard, `refetchInterval: 3000`
+4. `app/jobs/[id]/page.tsx` — job detail
+5. `app/model/page.tsx` — checkpoint list + rollback UI
+
+Create `lib/api.ts` as the single fetch wrapper (base URL from `NEXT_PUBLIC_API_URL`).
+Wrap `app/layout.tsx` with `QueryClientProvider`.
+
+Exit condition: create a KB entity in browser → push triples to model → watch job go COMPLETED → rollback.

@@ -41,6 +41,16 @@ services:
     restart: unless-stopped
     env_file: .env
 
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend:8000
+    depends_on:
+      - backend
+
 volumes:
   postgres_data:
   redis_data:

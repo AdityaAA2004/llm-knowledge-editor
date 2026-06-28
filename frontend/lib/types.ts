@@ -1,0 +1,93 @@
+export interface Company {
+  id: string;
+  name: string;
+  error_schema_json: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FeatureTeam {
+  id: string;
+  company_id: string;
+  name: string;
+  tech_lead: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface API {
+  id: string;
+  team_id: string;
+  name: string;
+  description: string | null;
+  point_of_contact: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface Endpoint {
+  id: string;
+  api_id: string;
+  path: string;
+  http_method: string;
+  business_function: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface EndpointVariant {
+  id: string;
+  endpoint_id: string;
+  client_type: string;
+  request_body_json: string | null;
+  response_200_json: string | null;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+}
+
+export interface Triple {
+  id: string;
+  subject: string;
+  relation: string;
+  object: string;
+  scope: string;
+  source_id: string;
+  source_type: string;
+  committed: boolean;
+  pending_erasure: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export type JobStatus = "PENDING" | "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+export type JobType = "edit_rome" | "edit_memit" | "erase_elm" | "rollback";
+
+export interface EditJob {
+  id: string;
+  status: JobStatus;
+  job_type: JobType;
+  triple_ids: string[];
+  submitted_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+  error_message: string | null;
+  checkpoint_path: string | null;
+}
+
+export interface ModelCheckpoint {
+  id: string;
+  path: string;
+  created_at: string;
+  job_id: string | null;
+  is_active: boolean;
+}
+
+export interface ModelStatus {
+  model_loaded: boolean;
+  active_checkpoint: ModelCheckpoint | null;
+  total_checkpoints: number;
+}

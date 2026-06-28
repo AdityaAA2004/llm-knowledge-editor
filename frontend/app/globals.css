@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design-system tokens (light default) ──────────────────────────── */
+:root {
+  --accent: #5b5bd6;
+  --accent-fg: #ffffff;
+  --bg: #f4f5f7;
+  --surface: #ffffff;
+  --surface-2: #fafbfc;
+  --border: #e8eaee;
+  --border-strong: #d6dae1;
+  --text: #1b2024;
+  --text-muted: #5d6670;
+  --text-faint: #8a929c;
+  --ok: #1a7f54;
+  --warn: #9a6a00;
+  --danger: #c5341f;
+  --info: #2563c9;
+  --muted: #6b7480;
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) 9%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 10%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 8%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 9%, transparent);
+  --muted-soft: color-mix(in srgb, var(--muted) 9%, transparent);
+  --shadow: 0 1px 2px rgba(16,24,40,.05), 0 12px 30px rgba(16,24,40,.10);
+}
+
+/* ── Dark theme override ─────────────────────────────────────────────── */
+.dark {
+  --bg: #0e1014;
+  --surface: #16191f;
+  --surface-2: #1b1f27;
+  --border: #262b33;
+  --border-strong: #363d48;
+  --text: #e7eaee;
+  --text-muted: #99a3ae;
+  --text-faint: #6b7480;
+  --accent-fg: #0e1014;
+  --ok: #48cd8c;
+  --warn: #e2ac3c;
+  --danger: #f0705c;
+  --info: #6aa3f5;
+  --muted: #8b939c;
+  --accent-soft: color-mix(in srgb, var(--accent) 22%, transparent);
+  --ok-soft: color-mix(in srgb, var(--ok) 16%, transparent);
+  --warn-soft: color-mix(in srgb, var(--warn) 16%, transparent);
+  --danger-soft: color-mix(in srgb, var(--danger) 16%, transparent);
+  --info-soft: color-mix(in srgb, var(--info) 16%, transparent);
+  --muted-soft: color-mix(in srgb, var(--muted) 16%, transparent);
+  --shadow: 0 1px 2px rgba(0,0,0,.5), 0 12px 32px rgba(0,0,0,.45);
+}
+
+/* ── Base reset ──────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: var(--font-ibm-plex-sans), 'IBM Plex Sans', system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  background: var(--bg);
+  color: var(--text);
+}
+.mono, code { font-family: var(--font-ibm-plex-mono), 'IBM Plex Mono', monospace; }
+input, textarea, button, select { font-family: inherit; }
+a { text-decoration: none; color: inherit; }
+
+/* ── Scrollbar ───────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong); border-radius: 6px;
+  border: 3px solid transparent; background-clip: content-box;
+}
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ── Animations ──────────────────────────────────────────────────────── */
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+@keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+
+/* ── Utility classes ─────────────────────────────────────────────────── */
+.mono { font-family: 'IBM Plex Mono', monospace; }
+.fade-up { animation: fadeUp .16s ease; }

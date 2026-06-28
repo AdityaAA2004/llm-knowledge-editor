@@ -78,7 +78,7 @@ async def cancel_job(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     job = await db.get(EditJob, id)
     if not job:
         raise HTTPException(404, "Job not found")
-    if job.status not in (JobStatus.PENDING, JobStatus.QUEUED):
+    if job.status not in (JobStatus.PENDING, JobStatus.QUEUED, JobStatus.RUNNING):
         raise HTTPException(409, f"Cannot cancel a job with status {job.status}")
     job.status = JobStatus.FAILED
     job.error_message = "Cancelled by user"
