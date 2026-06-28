@@ -16,7 +16,7 @@ def _fetch_triples(db, triple_ids: list[str]) -> list[dict]:
     rows = []
     for tid in triple_ids:
         row = db.execute(
-            text("SELECT subject, relation, object FROM triple WHERE id=:id::uuid"),
+            text("SELECT subject, relation, object FROM triple WHERE id=CAST(:id AS uuid)"),
             {"id": tid},
         ).fetchone()
         if row:
@@ -85,7 +85,7 @@ def run_elm_erase(job_id: str, triple_ids: list[str]) -> None:
         with get_db_session() as db:
             for tid in triple_ids:
                 db.execute(
-                    text("UPDATE triple SET pending_erasure=false, committed=false WHERE id=:id::uuid"),
+                    text("UPDATE triple SET pending_erasure=false, committed=false WHERE id=CAST(:id AS uuid)"),
                     {"id": tid},
                 )
             db.execute(

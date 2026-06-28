@@ -25,10 +25,10 @@ app.conf.update(
 )
 
 
-from celery.signals import worker_ready  # noqa: E402
+from celery.signals import worker_process_init  # noqa: E402
 
 
-@worker_ready.connect
-def on_worker_ready(sender, **kwargs):
+@worker_process_init.connect
+def on_worker_process_init(sender, **kwargs):
     from model_loader import load_model
     load_model()

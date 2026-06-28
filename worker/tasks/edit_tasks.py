@@ -26,7 +26,7 @@ def _fetch_triples(db, triple_ids: list[str]) -> list[dict]:
     rows = []
     for tid in triple_ids:
         row = db.execute(
-            text("SELECT subject, relation, object FROM triple WHERE id=:id::uuid"),
+            text("SELECT subject, relation, object FROM triple WHERE id=CAST(:id AS uuid)"),
             {"id": tid},
         ).fetchone()
         if row:
@@ -51,7 +51,7 @@ def _finalize(db, job_id: str, triple_ids: list[str], checkpoint_path: str) -> N
         {"id": checkpoint_id, "path": checkpoint_path, "now": datetime.now(timezone.utc), "job_id": job_id},
     )
     for tid in triple_ids:
-        db.execute(text("UPDATE triple SET committed=true WHERE id=:id::uuid"), {"id": tid})
+        db.execute(text("UPDATE triple SET committed=true WHERE id=CAST(:id AS uuid)"), {"id": tid})
     db.execute(
         text("INSERT INTO audit_log (id, job_id, action, created_at) VALUES (:id, :job_id, 'edit_committed', :now)"),
         {"id": str(uuid.uuid4()), "job_id": job_id, "now": datetime.now(timezone.utc)},

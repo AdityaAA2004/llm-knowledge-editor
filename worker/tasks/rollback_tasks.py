@@ -24,7 +24,7 @@ def run_rollback(job_id: str, checkpoint_id: str) -> None:
     # Fetch the checkpoint path and load weights before touching the DB
     with get_db_session() as db:
         checkpoint_path = db.execute(
-            text("SELECT path FROM model_checkpoint WHERE id=:id::uuid"),
+            text("SELECT path FROM model_checkpoint WHERE id=CAST(:id AS uuid)"),
             {"id": checkpoint_id},
         ).scalar()
 
@@ -48,9 +48,10 @@ def run_rollback(job_id: str, checkpoint_id: str) -> None:
             torch_dtype=torch.float16,
             device_map="auto",
             low_cpu_mem_usage=True,
+            local_files_only=True,
         )
         new_model.eval()
-        new_tokenizer = AutoTokenizer.from_pretrained(checkpoint_path)
+        new_tokenizer = AutoTokenizer.from_pretrained(checkpoint_path, local_files_only=True)
         if new_tokenizer.pad_token is None:
             new_tokenizer.pad_token = new_tokenizer.eos_token
 
