@@ -1,6 +1,24 @@
 "use client";
 
 import { ReactNode, CSSProperties, useState, useEffect } from "react";
+import dynamic from "next/dynamic";
+import { useTheme } from "./ThemeProvider";
+
+const MonacoEditorImpl = dynamic(
+  () => import("@monaco-editor/react").then((m) => m.default),
+  { ssr: false, loading: () => <EditorSkeleton /> }
+);
+
+function EditorSkeleton() {
+  return (
+    <div style={{
+      height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: "11.5px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace",
+    }}>
+      Loading editor…
+    </div>
+  );
+}
 
 export function Spinner({ size = 14 }: { size?: number }) {
   return (
@@ -186,6 +204,76 @@ export function JsonField({
           fontFamily: "'IBM Plex Mono',monospace", resize: "vertical",
         }}
       />
+    </div>
+  );
+}
+
+export function MonacoJsonField({
+  label, value, onChange, height = 200,
+}: {
+  label: string;
+  value: Record<string, unknown> | null;
+  onChange: (v: Record<string, unknown> | null) => void;
+  height?: number;
+}) {
+  const { theme } = useTheme();
+  const [raw, setRaw] = useState(() => value ? JSON.stringify(value, null, 2) : "");
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    setRaw(value ? JSON.stringify(value, null, 2) : "");
+    setErr(null);
+  }, []); // mount only — parent should key this component per entity
+
+  function handleChange(text: string | undefined) {
+    const t = text ?? "";
+    setRaw(t);
+    if (!t.trim()) { setErr(null); onChange(null); return; }
+    try {
+      const parsed = JSON.parse(t);
+      if (typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Must be a JSON object");
+      setErr(null);
+      onChange(parsed as Record<string, unknown>);
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: "6px", gap: "8px" }}>
+        <label style={{ fontSize: "11.5px", fontWeight: 500, color: "var(--text-muted)" }}>{label}</label>
+        {err ? (
+          <span style={{ fontSize: "11px", color: "var(--danger)", fontFamily: "'IBM Plex Mono',monospace" }}>⚠ invalid JSON</span>
+        ) : raw.trim() ? (
+          <span style={{ fontSize: "11px", color: "var(--ok)", fontFamily: "'IBM Plex Mono',monospace" }}>✓ valid</span>
+        ) : null}
+      </div>
+      <div style={{
+        border: `1px solid ${err ? "var(--danger)" : "var(--border)"}`,
+        borderRadius: "8px", overflow: "hidden", height: `${height}px`,
+      }}>
+        <MonacoEditorImpl
+          height={height}
+          defaultLanguage="json"
+          value={raw}
+          onChange={handleChange}
+          theme={theme === "dark" ? "vs-dark" : "vs"}
+          options={{
+            minimap: { enabled: false },
+            fontSize: 12.5,
+            lineNumbers: "on",
+            scrollBeyondLastLine: false,
+            folding: true,
+            wordWrap: "off",
+            tabSize: 2,
+            padding: { top: 8, bottom: 8 },
+            renderLineHighlight: "none",
+            overviewRulerBorder: false,
+            renderValidationDecorations: "on",
+          }}
+        />
+      </div>
     </div>
   );
 }

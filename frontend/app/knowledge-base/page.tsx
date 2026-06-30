@@ -3,8 +3,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { api } from "@/lib/api";
-import type { Company, FeatureTeam, API, Endpoint, Triple } from "@/lib/types";
-import { Spinner, ErrorMsg, Button, FieldInput, JsonField, StatusBadge, MonoBadge, Card, SectionLabel } from "@/components/ui";
+import type { Company, FeatureTeam, API, Endpoint, EndpointVariant, Triple } from "@/lib/types";
+import { Spinner, ErrorMsg, Button, FieldInput, MonacoJsonField, StatusBadge, MonoBadge, Card, SectionLabel } from "@/components/ui";
 
 // ── Detail panel sub-components ───────────────────────────────────────────────
 
@@ -54,12 +54,11 @@ function CompanyDetail({ company, triples }: { company: Company; triples: Triple
       saving={updateMut.isPending}
     >
       <FieldInput label="Company name" value={name} onChange={(v) => { setName(v); setDirty(true); }} />
-      <JsonField
+      <MonacoJsonField
         label="Error envelope (4xx / 5xx schema)"
         value={errorSchema}
         onChange={(v) => { setErrorSchema(v); setDirty(true); }}
-        placeholder={'{\n  "error": "string",\n  "code": "integer",\n  "message": "string"\n}'}
-        rows={7}
+        height={220}
       />
     </DetailShell>
   );
@@ -188,6 +187,7 @@ function EndpointDetail({ endpoint, triples }: { endpoint: Endpoint; triples: Tr
       saving={updateMut.isPending}
       onDelete={() => deleteMut.mutate()}
       deleting={deleteMut.isPending}
+      afterForm={<EndpointVariantsSection endpointId={endpoint.id} />}
     >
       <FieldInput label="Path" value={path} onChange={(v) => { setPath(v); setDirty(true); }} />
       <FieldInput label="HTTP method" value={method} onChange={(v) => { setMethod(v); setDirty(true); }} />
@@ -196,11 +196,157 @@ function EndpointDetail({ endpoint, triples }: { endpoint: Endpoint; triples: Tr
   );
 }
 
+// ── Endpoint variants ─────────────────────────────────────────────────────────
+
+function VariantEditRow({ variant, endpointId }: { variant: EndpointVariant; endpointId: string }) {
+  const qc = useQueryClient();
+  const [clientType, setClientType] = useState(variant.client_type);
+  const [reqBody, setReqBody] = useState<Record<string, unknown> | null>(
+    variant.request_body_json as Record<string, unknown> | null
+  );
+  const [res200, setRes200] = useState<Record<string, unknown> | null>(
+    variant.response_200_json as Record<string, unknown> | null
+  );
+  const [dirty, setDirty] = useState(false);
+
+  const updateMut = useMutation({
+    mutationFn: () => api.put(`/endpoints/${endpointId}/variants/${variant.id}`, {
+      client_type: clientType,
+      request_body_json: reqBody,
+      response_200_json: res200,
+    }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["variants", endpointId] }); setDirty(false); },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: () => api.delete(`/endpoints/${endpointId}/variants/${variant.id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["variants", endpointId] }),
+  });
+
+  return (
+    <Card style={{ marginBottom: "12px" }}>
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "10px" }}>
+        <MonoBadge label="VAR" tone="info" />
+        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "12.5px", fontWeight: 600 }}>{variant.client_type}</span>
+        <span style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>{variant.id.slice(0, 8)}</span>
+        {dirty && <span style={{ fontSize: "11px", color: "var(--warn)", marginLeft: "auto" }}>● unsaved</span>}
+      </div>
+      <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "14px" }}>
+        <FieldInput
+          label="Client type"
+          value={clientType}
+          onChange={(v) => { setClientType(v); setDirty(true); }}
+          placeholder="e.g. web, mobile, internal"
+        />
+        <MonacoJsonField
+          label="Request body (JSON)"
+          value={reqBody}
+          onChange={(v) => { setReqBody(v); setDirty(true); }}
+          height={180}
+        />
+        <MonacoJsonField
+          label="Response 200 (JSON)"
+          value={res200}
+          onChange={(v) => { setRes200(v); setDirty(true); }}
+          height={180}
+        />
+      </div>
+      <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--surface-2)", display: "flex", gap: "8px", alignItems: "center" }}>
+        <Button onClick={() => updateMut.mutate()} disabled={!dirty || updateMut.isPending} size="sm">
+          {updateMut.isPending && <Spinner size={11} />}Save
+        </Button>
+        <button
+          onClick={() => deleteMut.mutate()}
+          disabled={deleteMut.isPending}
+          style={{ marginLeft: "auto", background: "transparent", color: "var(--danger)", border: "1px solid var(--danger-soft)", borderRadius: "7px", padding: "5px 12px", font: "500 12px 'IBM Plex Sans'", cursor: deleteMut.isPending ? "default" : "pointer" }}
+        >
+          {deleteMut.isPending ? <Spinner size={11} /> : "Delete"}
+        </button>
+      </div>
+    </Card>
+  );
+}
+
+function AddVariantForm({ endpointId, onDone, onCancel }: { endpointId: string; onDone: () => void; onCancel: () => void }) {
+  const [clientType, setClientType] = useState("");
+  const [reqBody, setReqBody] = useState<Record<string, unknown> | null>(null);
+  const [res200, setRes200] = useState<Record<string, unknown> | null>(null);
+
+  const mut = useMutation({
+    mutationFn: () => api.post(`/endpoints/${endpointId}/variants/`, {
+      client_type: clientType,
+      request_body_json: reqBody,
+      response_200_json: res200,
+    }),
+    onSuccess: onDone,
+  });
+
+  return (
+    <Card style={{ marginBottom: "12px", border: "1px solid var(--accent-soft)" }}>
+      <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", fontSize: "12px", fontWeight: 600, color: "var(--accent)" }}>
+        New Variant
+      </div>
+      <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "14px" }}>
+        <FieldInput label="Client type" value={clientType} onChange={setClientType} placeholder="e.g. web, mobile, internal" required />
+        <MonacoJsonField label="Request body (JSON)" value={reqBody} onChange={setReqBody} height={160} />
+        <MonacoJsonField label="Response 200 (JSON)" value={res200} onChange={setRes200} height={160} />
+      </div>
+      <div style={{ padding: "10px 14px", borderTop: "1px solid var(--border)", background: "var(--surface-2)", display: "flex", gap: "8px" }}>
+        <Button onClick={() => mut.mutate()} disabled={mut.isPending || !clientType.trim()} size="sm">
+          {mut.isPending && <Spinner size={11} />}Create
+        </Button>
+        <Button variant="ghost" size="sm" onClick={onCancel}>Cancel</Button>
+      </div>
+    </Card>
+  );
+}
+
+function EndpointVariantsSection({ endpointId }: { endpointId: string }) {
+  const qc = useQueryClient();
+  const [adding, setAdding] = useState(false);
+
+  const { data: variants = [] } = useQuery<EndpointVariant[]>({
+    queryKey: ["variants", endpointId],
+    queryFn: () => api.get<EndpointVariant[]>(`/endpoints/${endpointId}/variants/`),
+  });
+
+  const active = variants.filter((v) => !v.deleted_at);
+
+  return (
+    <div style={{ marginTop: "24px" }}>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: "12px" }}>
+        <SectionLabel>Variants ({active.length})</SectionLabel>
+        <button
+          onClick={() => setAdding(true)}
+          style={{ marginLeft: "auto", background: "transparent", border: "none", cursor: "pointer", color: "var(--accent)", fontSize: "12px", fontWeight: 600 }}
+        >
+          + Add Variant
+        </button>
+      </div>
+      {adding && (
+        <AddVariantForm
+          endpointId={endpointId}
+          onDone={() => { qc.invalidateQueries({ queryKey: ["variants", endpointId] }); setAdding(false); }}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+      {active.map((v) => <VariantEditRow key={v.id} variant={v} endpointId={endpointId} />)}
+      {!active.length && !adding && (
+        <Card>
+          <div style={{ padding: "18px", textAlign: "center", fontSize: "12px", color: "var(--text-faint)" }}>
+            No variants yet — click <b>+ Add Variant</b> to define request / response shapes.
+          </div>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ── Shared detail shell ───────────────────────────────────────────────────────
 
 function DetailShell({
   typeLabel, id, name, committed, pending, erasure, triples,
-  dirty, onSave, onSaveDisabled, saving, onDelete, deleting, deleteError, children,
+  dirty, onSave, onSaveDisabled, saving, onDelete, deleting, deleteError, afterForm, children,
 }: {
   typeLabel: string; id: string; name: string;
   committed: number; pending: number; erasure: number;
@@ -212,6 +358,7 @@ function DetailShell({
   onDelete?: () => void;
   deleting?: boolean;
   deleteError?: string;
+  afterForm?: React.ReactNode;
   children: React.ReactNode;
 }) {
   function toneOf(t: Triple): "ok" | "warn" | "danger" {
@@ -283,6 +430,8 @@ function DetailShell({
       </Card>
 
       {deleteError && <div style={{ marginTop: "10px" }}><ErrorMsg message={deleteError} /></div>}
+
+      {afterForm}
 
       {dirty && (
         <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "9px", background: "var(--warn-soft)", border: "1px solid var(--warn-soft)", borderRadius: "9px", padding: "10px 13px", fontSize: "12px", color: "var(--warn)" }}>
@@ -595,10 +744,10 @@ export default function KnowledgeBasePage() {
             Select an entity in the tree to view and edit it
           </div>
         )}
-        {selected?.type === "company" && <CompanyDetail company={selected.data} triples={activeTriples} />}
-        {selected?.type === "team" && <TeamDetail team={selected.data} triples={activeTriples} />}
-        {selected?.type === "api" && <ApiDetail apiObj={selected.data} triples={activeTriples} />}
-        {selected?.type === "endpoint" && <EndpointDetail endpoint={selected.data} triples={activeTriples} />}
+        {selected?.type === "company" && <CompanyDetail key={selected.data.id} company={selected.data} triples={activeTriples} />}
+        {selected?.type === "team" && <TeamDetail key={selected.data.id} team={selected.data} triples={activeTriples} />}
+        {selected?.type === "api" && <ApiDetail key={selected.data.id} apiObj={selected.data} triples={activeTriples} />}
+        {selected?.type === "endpoint" && <EndpointDetail key={selected.data.id} endpoint={selected.data} triples={activeTriples} />}
       </div>
     </div>
   );
