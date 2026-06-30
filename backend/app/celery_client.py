@@ -17,3 +17,16 @@ def _get_celery() -> Celery:
 
 def dispatch(task_name: str, args: list) -> None:
     _get_celery().send_task(task_name, args=args, queue="model_writes")
+
+
+def is_worker_online(timeout: float = 2.0) -> bool:
+    """Ping the model_writes queue for a live worker (the RunPod GPU pod).
+
+    No worker should ever be left running locally, so any reply here is
+    assumed to be the remote worker.
+    """
+    try:
+        replies = _get_celery().control.ping(timeout=timeout)
+    except Exception:
+        return False
+    return bool(replies)

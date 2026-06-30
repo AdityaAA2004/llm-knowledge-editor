@@ -9,6 +9,7 @@ from app.celery_client import dispatch
 from app.db import get_db
 from app.models.job import EditJob, JobStatus, JobType
 from app.schemas.job import EditJobCreate, EditJobRead, EraseJobCreate
+from app.services.worker_health import check_worker_or_fail_jobs
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -24,6 +25,9 @@ async def list_jobs(
     job_type: str | None = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
+    # Auto-fail any stuck jobs if the remote worker has gone offline.
+    # This endpoint is polled every 3 s by the frontend, so detection is timely.
+    await check_worker_or_fail_jobs(db)
     q = select(EditJob).order_by(EditJob.submitted_at.desc())
     if status:
         q = q.where(EditJob.status == status)
@@ -37,6 +41,8 @@ async def list_jobs(
 async def create_edit_job(body: EditJobCreate, db: AsyncSession = Depends(get_db)):
     if body.job_type not in (JobType.edit_rome, JobType.edit_memit):
         raise HTTPException(400, "job_type must be edit_rome or edit_memit for this endpoint")
+    if not await check_worker_or_fail_jobs(db):
+        raise HTTPException(503, "Remote worker is not active. Start the RunPod GPU pod before submitting jobs.")
     job = EditJob(
         status=JobStatus.QUEUED,
         job_type=body.job_type,
@@ -52,6 +58,8 @@ async def create_edit_job(body: EditJobCreate, db: AsyncSession = Depends(get_db
 
 @router.post("/erase", response_model=EditJobRead, status_code=201)
 async def create_erase_job(body: EraseJobCreate, db: AsyncSession = Depends(get_db)):
+    if not await check_worker_or_fail_jobs(db):
+        raise HTTPException(503, "Remote worker is not active. Start the RunPod GPU pod before submitting jobs.")
     job = EditJob(
         status=JobStatus.QUEUED,
         job_type=JobType.erase_elm,

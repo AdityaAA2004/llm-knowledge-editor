@@ -10,6 +10,7 @@ from app.celery_client import dispatch
 from app.db import get_db
 from app.models.job import EditJob, JobStatus, JobType, ModelCheckpoint
 from app.schemas.job import EditJobRead, ModelCheckpointRead, ModelStatusRead, RollbackRequest
+from app.services.worker_health import check_worker_or_fail_jobs
 
 router = APIRouter(prefix="/model", tags=["model"])
 
@@ -38,6 +39,8 @@ async def list_checkpoints(db: AsyncSession = Depends(get_db)):
 
 @router.post("/rollback", response_model=EditJobRead, status_code=201)
 async def rollback_model(body: RollbackRequest, db: AsyncSession = Depends(get_db)):
+    if not await check_worker_or_fail_jobs(db):
+        raise HTTPException(503, "Remote worker is not active. Start the RunPod GPU pod before rolling back.")
     checkpoint = await db.get(ModelCheckpoint, body.checkpoint_id)
     if not checkpoint:
         raise HTTPException(404, "Checkpoint not found")
