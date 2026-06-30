@@ -55,7 +55,7 @@ def _mark_failed(job_id: str, error: str) -> None:
 
 @app.task(name="tasks.erase_tasks.run_elm_erase", queue="model_writes")
 def run_elm_erase(job_id: str, triple_ids: list[str]) -> None:
-    from concept_erasure.scrubbing import scrub_llama
+    from concept_erasure.scrubbing import scrub
 
     with get_db_session() as db:
         db.execute(
@@ -74,7 +74,7 @@ def run_elm_erase(job_id: str, triple_ids: list[str]) -> None:
         dataset = _build_erasure_dataset(triples)
 
         logger.info("Applying LEACE scrubbing to job %s (%d triples)", job_id, len(triples))
-        scrub_llama(
+        scrub(
             model=model,
             train=dataset,
             z_column="has_concept",
