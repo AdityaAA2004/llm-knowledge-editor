@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.celery_client import dispatch
+from app.celery_client import dispatch, is_worker_online
 from app.db import get_db
 from app.models.job import EditJob, JobStatus, JobType, ModelCheckpoint
 from app.schemas.job import EditJobRead, ModelCheckpointRead, ModelStatusRead, RollbackRequest
@@ -17,15 +17,19 @@ router = APIRouter(prefix="/model", tags=["model"])
 
 @router.get("/status", response_model=ModelStatusRead)
 async def model_status(db: AsyncSession = Depends(get_db)):
+    import asyncio
     active_result = await db.execute(
         select(ModelCheckpoint).where(ModelCheckpoint.is_active == True)
     )
     active = active_result.scalar_one_or_none()
     total = await db.scalar(select(func.count()).select_from(ModelCheckpoint))
+    # is_worker_online() blocks (Celery ping waits up to 2s) — run off the event loop
+    worker_up = await asyncio.to_thread(is_worker_online)
     return ModelStatusRead(
         model_id=os.environ.get("MODEL_ID", "meta-llama/Llama-3.2-3B"),
         active_checkpoint=ModelCheckpointRead.model_validate(active) if active else None,
         total_checkpoints=total or 0,
+        model_loaded=worker_up,
     )
 
 

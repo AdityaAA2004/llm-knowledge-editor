@@ -60,3 +60,4 @@ class ModelStatusRead(BaseModel):
     model_id: str
     active_checkpoint: ModelCheckpointRead | None
     total_checkpoints: int
+    model_loaded: bool
