@@ -129,6 +129,7 @@ docker compose build && docker compose up -d
 - `worker/patches/layer_stats.py` — patched ROME layer_stats (see ROME patching section below)
 - `worker/patches/compute_u.py` — patched: `get_inv_cov()` returns float32, model is fp16; cast inv_cov `.to(u.dtype)` before matmul
 - `worker/patches/compute_v.py` — patched: `model.config.n_embd` → `hidden_size` for LLaMA; `delta` (float32) cast to `.to(cur_out.dtype)` and `.to(target_init.dtype)` to prevent dtype mismatch during optimization
+- `worker/patches/compute_z.py` — MEMIT-only, copied to `/memit/memit/compute_z.py`. Patched: `n_embd`→`hidden_size`; modern transformers return a **bare hidden-states tensor** from `LlamaDecoderLayer` (not a tuple), so `edit_output_fn` and `full_repr` use a `_hidden_states()` helper that handles tuple *or* tensor (upstream `cur_out[0][i,idx,:]` sliced the batch dim → `IndexError`); `delta` cast to activation dtype for the in-place add and final target
 - `worker/tasks/rollback_tasks.py` — `local_files_only=True` on both `from_pretrained` calls (newer `huggingface_hub` rejects local paths as repo IDs without it)
 - All patches copied to both `/rome/rome/` and `/memit/rome/` in the Dockerfile
 - Worker Docker image built and pushed to **Amazon ECR Public**

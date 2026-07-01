@@ -24,6 +24,9 @@ COPY patches/compute_u.py /rome/rome/compute_u.py
 COPY patches/compute_u.py /memit/rome/compute_u.py
 COPY patches/compute_v.py /rome/rome/compute_v.py
 COPY patches/compute_v.py /memit/rome/compute_v.py
+# compute_z is MEMIT-only; patched for LLaMA tied embeddings + modern transformers
+# (bare-tensor decoder-layer output) + fp16/fp32 delta dtype
+COPY patches/compute_z.py /memit/memit/compute_z.py
 
 ENV PYTHONPATH="/rome:/memit"
 
