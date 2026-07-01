@@ -35,9 +35,16 @@ def _fetch_triples(db, triple_ids: list[str]) -> list[dict]:
 
 
 def _save_checkpoint(model, tokenizer, checkpoint_path: str) -> None:
+    import model_loader
+    from scrubber_persistence import save_scrubbers
+
     Path(checkpoint_path).mkdir(parents=True, exist_ok=True)
     model.save_pretrained(checkpoint_path)
     tokenizer.save_pretrained(checkpoint_path)
+    # If concept erasure is currently active, record it in this checkpoint's sidecar so
+    # rolling back here restores the erasure (edits are weights; erasers are hooks).
+    if model_loader._active_scrubbers:
+        save_scrubbers(model_loader._active_scrubbers, checkpoint_path)
 
 
 def _finalize(db, job_id: str, triple_ids: list[str], checkpoint_path: str) -> None:
@@ -73,8 +80,6 @@ def _mark_failed(job_id: str, error: str) -> None:
 
 @app.task(name="tasks.edit_tasks.run_rome_edit", queue="model_writes")
 def run_rome_edit(job_id: str, triple_ids: list[str]) -> None:
-    from rome import ROMEHyperParams, apply_rome_to_model
-
     with get_db_session() as db:
         db.execute(
             text("UPDATE edit_job SET status='RUNNING', started_at=:now WHERE id=:id"),
@@ -88,6 +93,8 @@ def run_rome_edit(job_id: str, triple_ids: list[str]) -> None:
         return
 
     try:
+        from rome import ROMEHyperParams, apply_rome_to_model
+
         model, tokenizer = get_model()
         requests = [triple_to_rome_request(t) for t in triples]
         hparams = ROMEHyperParams.from_json(HPARAMS_DIR / "ROME" / "Llama-3.2-3B.json")
@@ -113,8 +120,6 @@ def run_rome_edit(job_id: str, triple_ids: list[str]) -> None:
 
 @app.task(name="tasks.edit_tasks.run_memit_batch", queue="model_writes")
 def run_memit_batch(job_id: str, triple_ids: list[str]) -> None:
-    from memit import MEMITHyperParams, apply_memit_to_model
-
     with get_db_session() as db:
         db.execute(
             text("UPDATE edit_job SET status='RUNNING', started_at=:now WHERE id=:id"),
@@ -128,6 +133,8 @@ def run_memit_batch(job_id: str, triple_ids: list[str]) -> None:
         return
 
     try:
+        from memit import MEMITHyperParams, apply_memit_to_model
+
         model, tokenizer = get_model()
         requests = [triple_to_rome_request(t) for t in triples]
         hparams = MEMITHyperParams.from_json(HPARAMS_DIR / "MEMIT" / "Llama-3.2-3B.json")

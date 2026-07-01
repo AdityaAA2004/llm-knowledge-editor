@@ -10,6 +10,11 @@ logger = logging.getLogger(__name__)
 _model = None
 _tokenizer = None
 
+# Ordered list of LEACE ConceptScrubbers currently attached (via permanent forward
+# hooks) to `_model`. Erasure is cumulative, so this grows with each erase job and is
+# saved into every checkpoint sidecar so the erasure carries across edits and rollbacks.
+_active_scrubbers: list = []
+
 
 def load_model():
     global _model, _tokenizer
