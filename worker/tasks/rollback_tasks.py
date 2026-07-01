@@ -59,6 +59,8 @@ def run_rollback(job_id: str, checkpoint_id: str) -> None:
         new_model.config._name_or_path = os.environ.get(
             "MODEL_WEIGHTS_PATH", new_model.config._name_or_path
         )
+        # Same GPT-era alias MEMIT/ROME expect (see model_loader.load_model).
+        new_model.config.n_embd = new_model.config.hidden_size
         new_tokenizer = AutoTokenizer.from_pretrained(checkpoint_path, local_files_only=True)
         if new_tokenizer.pad_token is None:
             new_tokenizer.pad_token = new_tokenizer.eos_token

@@ -44,6 +44,9 @@ def load_model():
         low_cpu_mem_usage=True,
     )
     _model.eval()
+    # MEMIT's compute_z (and other ROME/MEMIT code) reads the GPT-era config alias
+    # `n_embd`; LLaMA names it `hidden_size`. Expose the alias so those paths work.
+    _model.config.n_embd = _model.config.hidden_size
 
     device = next(_model.parameters()).device
     logger.info("Model ready: %s on %s", model_id, device)
