@@ -2,7 +2,7 @@ import uuid
 import logging
 from datetime import datetime, timezone
 
-from datasets import Dataset
+from datasets import ClassLabel, Dataset, Features, Value
 from sqlalchemy import text
 
 from celery_app import app
@@ -38,10 +38,17 @@ def _build_erasure_dataset(triples: list[dict]) -> Dataset:
         f"The {t['subject']} is a component of the system"
         for t in triples
     ]
-    return Dataset.from_dict({
-        "text": positives + negatives,
-        "has_concept": [1] * len(positives) + [0] * len(negatives),
+    features = Features({
+        "text": Value("string"),
+        "has_concept": ClassLabel(num_classes=2, names=["negative", "positive"]),
     })
+    return Dataset.from_dict(
+        {
+            "text": positives + negatives,
+            "has_concept": [1] * len(positives) + [0] * len(negatives),
+        },
+        features=features,
+    )
 
 
 def _mark_failed(job_id: str, error: str) -> None:
