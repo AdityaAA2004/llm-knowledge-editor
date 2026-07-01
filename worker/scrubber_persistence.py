@@ -20,6 +20,7 @@ filter, same `mangle_module_path` keys, same pre/post-hook semantics) but never 
 
 import os
 import logging
+import dataclasses
 from functools import partial
 
 import torch
@@ -27,6 +28,21 @@ import torch
 logger = logging.getLogger(__name__)
 
 SCRUBBER_FILENAME = "scrubber.pt"
+
+
+def _eraser_to(eraser, device):
+    """Move a frozen LeaceEraser's tensors to `device`.
+
+    v0.2.4's `LeaceEraser` is a frozen dataclass with no `.to()` method, so we rebuild
+    it via `dataclasses.replace`. Fresh erasers are already on the model device (no-op);
+    erasers loaded from a sidecar arrive on CPU and must be moved.
+    """
+    return dataclasses.replace(
+        eraser,
+        proj_left=eraser.proj_left.to(device),
+        proj_right=eraser.proj_right.to(device),
+        bias=eraser.bias.to(device) if eraser.bias is not None else None,
+    )
 
 
 def save_scrubbers(scrubbers: list, checkpoint_path: str) -> str:
@@ -69,7 +85,7 @@ def apply_scrubber(model, scrubber) -> list:
     device = next(target.parameters()).device
 
     # Move erasers onto the model's device once so hook matmuls don't cross devices.
-    scrubber.erasers = {k: e.to(device) for k, e in scrubber.erasers.items()}
+    scrubber.erasers = {k: _eraser_to(e, device) for k, e in scrubber.erasers.items()}
 
     def post_wrapper(_, __, output, name):
         eraser = assert_type(LeaceEraser, scrubber.erasers[mangle_module_path(name)])
