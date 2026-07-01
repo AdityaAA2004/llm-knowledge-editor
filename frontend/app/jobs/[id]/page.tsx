@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
@@ -43,8 +43,9 @@ function labelOf(t: Triple) {
 
 export default function JobDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const router = useRouter();
   const qc = useQueryClient();
-  const [cancelError, setCancelError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const { data: job, isLoading, error } = useQuery<EditJob>({
     queryKey: ["job", id],
@@ -64,18 +65,28 @@ export default function JobDetailPage() {
   const cancelMut = useMutation({
     mutationFn: () => api.post(`/jobs/${id}/cancel`),
     onSuccess: () => {
-      setCancelError(null);
+      setActionError(null);
       qc.invalidateQueries({ queryKey: ["job", id] });
     },
     onError: (e) => {
       const msg = (e as Error).message;
-      setCancelError(
+      setActionError(
         msg.startsWith("409")
           ? "Job can no longer be cancelled — it has already finished."
           : `Cancel failed: ${msg}`
       );
       qc.invalidateQueries({ queryKey: ["job", id] });
     },
+  });
+
+  const rerunMut = useMutation({
+    mutationFn: () => api.post<EditJob>(`/jobs/${id}/rerun`),
+    onSuccess: (newJob) => {
+      setActionError(null);
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+      router.push(`/jobs/${newJob.id}`);
+    },
+    onError: (e) => setActionError(`Re-run failed: ${(e as Error).message}`),
   });
 
   if (isLoading) return <div style={{ display: "flex", justifyContent: "center", padding: "60px" }}><Spinner /></div>;
@@ -128,7 +139,7 @@ export default function JobDetailPage() {
               {running && <span style={{ width: "11px", height: "11px", border: `1.6px solid var(--${sv})`, borderRightColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />}
               {job.status}
             </span>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "11.5px", color: "var(--text-faint)" }}>{job.id}</span>
+            <span style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "11.5px", color: "var(--text-faint)" }}>{job.id}</span>
           </div>
           <div style={{ fontSize: "22px", fontWeight: 600, letterSpacing: "-0.3px" }}>{TYPE_LABELS[job.job_type] ?? job.job_type}</div>
           <div style={{ fontSize: "13px", color: "var(--text-muted)", marginTop: "3px" }}>
@@ -144,11 +155,20 @@ export default function JobDetailPage() {
             {cancelMut.isPending ? <Spinner size={12} /> : "Cancel job"}
           </button>
         )}
+        {(completed || failed) && (
+          <button
+            onClick={() => rerunMut.mutate()}
+            disabled={rerunMut.isPending}
+            style={{ background: "var(--info)", color: "#fff", border: "1px solid var(--info)", borderRadius: "8px", padding: "9px 14px", font: "500 12.5px 'IBM Plex Sans'", cursor: "pointer" }}
+          >
+            {rerunMut.isPending ? <Spinner size={12} /> : "Run again"}
+          </button>
+        )}
       </div>
 
-      {cancelError && (
+      {actionError && (
         <div style={{ marginBottom: "16px" }}>
-          <ErrorMsg message={cancelError} />
+          <ErrorMsg message={actionError} />
         </div>
       )}
 
@@ -162,7 +182,7 @@ export default function JobDetailPage() {
         <Card style={{ padding: "16px", marginBottom: "20px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "9px" }}>
             <span style={{ color: "var(--text-muted)" }}>{stages[stageIdx] ?? ""}</span>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace", color: "var(--info)" }}>{progress}%</span>
+            <span style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--info)" }}>{progress}%</span>
           </div>
           <div style={{ height: "7px", borderRadius: "4px", background: "var(--border)", overflow: "hidden" }}>
             <div style={{ height: "100%", width: `${progress}%`, background: "var(--info)", borderRadius: "4px", transition: "width .45s ease" }} />
@@ -199,7 +219,7 @@ export default function JobDetailPage() {
                 {label}
               </span>
               {isDone && completed && i === stages.length - 1 && job.completed_at && (
-                <span style={{ marginLeft: "auto", fontSize: "11.5px", fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-faint)" }}>
+                <span style={{ marginLeft: "auto", fontSize: "11.5px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--text-faint)" }}>
                   {new Date(job.completed_at).toLocaleTimeString()}
                 </span>
               )}
@@ -223,17 +243,17 @@ export default function JobDetailPage() {
             {job.triple_ids.map((tid) => {
               const t = jobTriples.find((x) => x.id === tid);
               if (!t) return (
-                <div key={tid} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "11px 15px", borderBottom: "1px solid var(--border)", fontFamily: "'IBM Plex Mono',monospace", fontSize: "12px" }}>
+                <div key={tid} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "11px 15px", borderBottom: "1px solid var(--border)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "12px" }}>
                   <span style={{ color: "var(--text-faint)" }}>{tid}</span>
                 </div>
               );
               const tone = toneOf(t);
               return (
-                <div key={tid} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "11px 15px", borderBottom: "1px solid var(--border)", fontFamily: "'IBM Plex Mono',monospace", fontSize: "12px" }}>
+                <div key={tid} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "11px 15px", borderBottom: "1px solid var(--border)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "12px" }}>
                   <span>{t.subject}</span>
                   <span style={{ color: "var(--accent)" }}>{t.relation}</span>
                   <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{t.object}</span>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontFamily: "'IBM Plex Sans',sans-serif", fontSize: "10.5px", fontWeight: 600, color: `var(--${tone})`, background: `var(--${tone}-soft)`, borderRadius: "20px", padding: "2px 9px" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontFamily: "var(--font-nunito),sans-serif", fontSize: "10.5px", fontWeight: 600, color: `var(--${tone})`, background: `var(--${tone}-soft)`, borderRadius: "20px", padding: "2px 9px" }}>
                     {labelOf(t)}
                   </span>
                 </div>

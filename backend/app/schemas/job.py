@@ -22,6 +22,7 @@ class EditJobRead(BaseModel):
     completed_at: datetime | None
     error_message: str | None
     checkpoint_path: str | None
+    target_checkpoint_id: uuid.UUID | None
 
     model_config = {"from_attributes": True}
 

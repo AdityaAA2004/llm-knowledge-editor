@@ -53,6 +53,7 @@ async def rollback_model(body: RollbackRequest, db: AsyncSession = Depends(get_d
         job_type=JobType.rollback,
         triple_ids=[],
         submitted_at=datetime.now(timezone.utc),
+        target_checkpoint_id=body.checkpoint_id,
     )
     db.add(job)
     await db.commit()

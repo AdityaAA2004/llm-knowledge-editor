@@ -199,10 +199,10 @@ export default function TriplesPage() {
                     {checked ? "✓" : ""}
                   </span>
                 </div>
-                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "12.5px", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.subject}</div>
-                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "12px", color: "var(--accent)" }}>{t.relation}</div>
-                <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "12.5px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.object}</div>
-                <div style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>{t.scope}</div>
+                <div style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "12.5px", fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.subject}</div>
+                <div style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "12px", color: "var(--accent)" }}>{t.relation}</div>
+                <div style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "12.5px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{t.object}</div>
+                <div style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>{t.scope}</div>
                 <div>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11px", fontWeight: 600, color: `var(--${tone})`, background: `var(--${tone}-soft)`, borderRadius: "20px", padding: "3px 10px" }}>
                     <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: `var(--${tone})` }} />

@@ -1,22 +1,22 @@
 import type { Metadata } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import { Nunito, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { QueryProvider } from "@/components/QueryProvider";
 import { ThemeProvider } from "@/components/ThemeProvider";
 import { Sidebar } from "@/components/Sidebar";
 import { Topbar } from "@/components/Topbar";
 
-const ibmPlexSans = IBM_Plex_Sans({
+const nunito = Nunito({
   weight: ["400", "500", "600", "700"],
   subsets: ["latin"],
-  variable: "--font-ibm-plex-sans",
+  variable: "--font-nunito",
   display: "swap",
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
+const jetbrainsMono = JetBrains_Mono({
   weight: ["400", "500", "600"],
   subsets: ["latin"],
-  variable: "--font-ibm-plex-mono",
+  variable: "--font-jetbrains-mono",
   display: "swap",
 });
 
@@ -27,7 +27,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${ibmPlexSans.variable} ${ibmPlexMono.variable}`}>
+    <html lang="en" className={`${nunito.variable} ${jetbrainsMono.variable}`}>
       <body>
         <QueryProvider>
           <ThemeProvider>

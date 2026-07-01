@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { api } from "@/lib/api";
@@ -43,11 +43,22 @@ function fmtRel(ts: string) {
 
 export default function JobsPage() {
   const [filter, setFilter] = useState<JFilter>("all");
+  const [rerunError, setRerunError] = useState<string | null>(null);
+  const qc = useQueryClient();
 
   const { data: jobs, isLoading, error } = useQuery<EditJob[]>({
     queryKey: ["jobs"],
     queryFn: () => api.get<EditJob[]>("/jobs/"),
     refetchInterval: 3000,
+  });
+
+  const rerunMut = useMutation({
+    mutationFn: (jobId: string) => api.post<EditJob>(`/jobs/${jobId}/rerun`),
+    onSuccess: () => {
+      setRerunError(null);
+      qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+    onError: (e) => setRerunError(`Re-run failed: ${(e as Error).message}`),
   });
 
   const all = jobs ?? [];
@@ -86,6 +97,7 @@ export default function JobsPage() {
 
       {isLoading && <div style={{ textAlign: "center", padding: "40px" }}><Spinner /></div>}
       {error && <ErrorMsg message={(error as Error).message} />}
+      {rerunError && <div style={{ marginBottom: "12px" }}><ErrorMsg message={rerunError} /></div>}
 
       {visible.length === 0 && !isLoading && (
         <div style={{ textAlign: "center", padding: "60px 20px", fontSize: "13px", color: "var(--text-faint)" }}>
@@ -115,6 +127,8 @@ export default function JobsPage() {
           }
 
           const summary = j.triple_ids?.length ? `${j.triple_ids.length} triple${j.triple_ids.length > 1 ? "s" : ""}` : "";
+          const terminal = j.status === "COMPLETED" || j.status === "FAILED";
+          const rerunning = rerunMut.isPending && rerunMut.variables === j.id;
 
           return (
             <Link key={j.id} href={`/jobs/${j.id}`} style={{ textDecoration: "none" }}>
@@ -131,12 +145,22 @@ export default function JobsPage() {
                     )}
                     {j.status}
                   </span>
-                  <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "13px", fontWeight: 600 }}>
+                  <span style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "13px", fontWeight: 600 }}>
                     {TYPE_LABELS[j.job_type] ?? j.job_type}
                   </span>
                   <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{summary}</span>
-                  <span style={{ marginLeft: "auto", fontFamily: "'IBM Plex Mono',monospace", fontSize: "11px", color: "var(--text-faint)" }}>{j.id.slice(0, 8)}…</span>
+                  <span style={{ marginLeft: "auto", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "11px", color: "var(--text-faint)" }}>{j.id.slice(0, 8)}…</span>
                   <span style={{ fontSize: "11.5px", color: "var(--text-faint)", minWidth: "74px", textAlign: "right" }}>{timeLabel}</span>
+                  {terminal && (
+                    <button
+                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); rerunMut.mutate(j.id); }}
+                      disabled={rerunning}
+                      title="Run this job again"
+                      style={{ flex: "0 0 auto", background: "var(--info)", color: "#fff", border: "1px solid var(--info)", borderRadius: "7px", padding: "5px 10px", font: "500 11.5px 'IBM Plex Sans'", cursor: "pointer" }}
+                    >
+                      {rerunning ? <Spinner size={11} /> : "Run again"}
+                    </button>
+                  )}
                 </div>
 
                 {running && (
@@ -144,12 +168,12 @@ export default function JobsPage() {
                     <div style={{ flex: 1, height: "6px", borderRadius: "4px", background: "var(--border)", overflow: "hidden" }}>
                       <div style={{ height: "100%", width: "45%", background: "var(--info)", borderRadius: "4px", transition: "width .45s ease" }} />
                     </div>
-                    <span style={{ fontSize: "11px", fontFamily: "'IBM Plex Mono',monospace", color: "var(--info)", minWidth: "90px" }}>{stages[stageIdx] ?? ""}</span>
+                    <span style={{ fontSize: "11px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--info)", minWidth: "90px" }}>{stages[stageIdx] ?? ""}</span>
                   </div>
                 )}
 
                 {j.error_message && (
-                  <div style={{ marginTop: "11px", fontFamily: "'IBM Plex Mono',monospace", fontSize: "11.5px", color: "var(--danger)", background: "var(--danger-soft)", borderRadius: "7px", padding: "8px 11px" }}>
+                  <div style={{ marginTop: "11px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "11.5px", color: "var(--danger)", background: "var(--danger-soft)", borderRadius: "7px", padding: "8px 11px" }}>
                     {j.error_message}
                   </div>
                 )}

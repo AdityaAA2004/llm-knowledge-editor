@@ -90,7 +90,7 @@ export function Sidebar() {
         </div>
         <div style={{ lineHeight: 1.1 }}>
           <div style={{ fontWeight: 600, fontSize: "13.5px", letterSpacing: "-0.1px" }}>SLM Knowledge</div>
-          <div style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>Llama-3.2-3B</div>
+          <div style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>Llama-3.2-3B</div>
         </div>
       </div>
 
@@ -116,7 +116,7 @@ export function Sidebar() {
           </svg>
           Triples
           {pendingCount > 0 && (
-            <span style={{ marginLeft: "auto", fontSize: "11px", fontFamily: "'IBM Plex Mono',monospace", color: "var(--text-faint)" }}>
+            <span style={{ marginLeft: "auto", fontSize: "11px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--text-faint)" }}>
               {pendingCount}
             </span>
           )}
@@ -130,7 +130,7 @@ export function Sidebar() {
           </svg>
           Jobs
           {activeJobs > 0 && (
-            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", fontFamily: "'IBM Plex Mono',monospace", color: "var(--info)" }}>
+            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--info)" }}>
               <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: "var(--info)", animation: "pulseDot 1.2s infinite" }} />
               {activeJobs}
             </span>
@@ -172,16 +172,16 @@ export function Sidebar() {
               boxShadow: modelOnline ? "0 0 0 3px var(--ok-soft)" : "none",
             }} />
             <span style={{ fontSize: "12px", fontWeight: 600 }}>{modelOnline ? "Model online" : "Model offline"}</span>
-            <span style={{ marginLeft: "auto", fontSize: "10.5px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>cuda:0</span>
+            <span style={{ marginLeft: "auto", fontSize: "10.5px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>cuda:0</span>
           </div>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "'IBM Plex Mono',monospace", display: "flex", justifyContent: "space-between" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", display: "flex", justifyContent: "space-between" }}>
             <span>active</span>
             <span style={{ color: "var(--text)" }}>{cpShort}</span>
           </div>
           <div style={{ marginTop: "8px", height: "5px", borderRadius: "3px", background: "var(--border)", overflow: "hidden" }}>
             <div style={{ height: "100%", width: "28%", background: "var(--accent)", borderRadius: "3px" }} />
           </div>
-          <div style={{ fontSize: "10.5px", color: "var(--text-faint)", marginTop: "5px", fontFamily: "'IBM Plex Mono',monospace" }}>
+          <div style={{ fontSize: "10.5px", color: "var(--text-faint)", marginTop: "5px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>
             VRAM 6.8 GB / 24 GB
           </div>
         </div>

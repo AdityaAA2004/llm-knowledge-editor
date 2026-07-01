@@ -94,7 +94,7 @@ export default function ModelPage() {
         <div style={{ marginTop: "18px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)", marginBottom: "6px" }}>
             <span>GPU memory</span>
-            <span style={{ fontFamily: "'IBM Plex Mono',monospace" }}>6.8 GB / 24 GB</span>
+            <span style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>6.8 GB / 24 GB</span>
           </div>
           <div style={{ height: "8px", borderRadius: "5px", background: "var(--border)", overflow: "hidden" }}>
             <div style={{ height: "100%", width: "28%", background: "var(--accent)", borderRadius: "5px" }} />
@@ -105,7 +105,7 @@ export default function ModelPage() {
       {/* Checkpoint history */}
       <div style={{ display: "flex", alignItems: "center", marginBottom: "12px" }}>
         <SectionLabel>Checkpoint history</SectionLabel>
-        <span style={{ marginLeft: "9px", fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>
+        <span style={{ marginLeft: "9px", fontSize: "11px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>
           {cpSorted.length} checkpoints · /data/checkpoints
         </span>
       </div>
@@ -127,7 +127,7 @@ export default function ModelPage() {
             }} />
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "9px" }}>
-                <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "13px", fontWeight: 600 }}>
+                <span style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "13px", fontWeight: 600 }}>
                   cp-{cp.path.split("-").slice(-1)[0].replace(".bin", "")}
                 </span>
                 {cp.is_active && (
@@ -136,14 +136,14 @@ export default function ModelPage() {
                   </span>
                 )}
               </div>
-              <div style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "11px", color: "var(--text-faint)", marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "11px", color: "var(--text-faint)", marginTop: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {cp.path}
               </div>
             </div>
             <div style={{ textAlign: "right", flex: "0 0 auto" }}>
               <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>{fmtRel(cp.created_at)}</div>
               {cp.job_id && (
-                <div style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>{cp.job_id.slice(0, 8)}…</div>
+                <div style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>{cp.job_id.slice(0, 8)}…</div>
               )}
             </div>
             {cp.is_active ? (

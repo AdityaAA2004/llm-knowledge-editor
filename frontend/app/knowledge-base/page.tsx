@@ -15,7 +15,7 @@ function StatCard({ dot, label, count, sub }: { dot: string; label: string; coun
         <span style={{ width: "7px", height: "7px", borderRadius: "50%", background: `var(--${dot})` }} />
         {label}
       </div>
-      <div style={{ fontSize: "22px", fontWeight: 600, fontFamily: "'IBM Plex Mono',monospace" }}>{count}</div>
+      <div style={{ fontSize: "22px", fontWeight: 600, fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>{count}</div>
       <div style={{ fontSize: "10.5px", color: "var(--text-faint)", marginTop: "2px" }}>{sub}</div>
     </div>
   );
@@ -227,8 +227,8 @@ function VariantEditRow({ variant, endpointId }: { variant: EndpointVariant; end
     <Card style={{ marginBottom: "12px" }}>
       <div style={{ padding: "10px 14px", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: "10px" }}>
         <MonoBadge label="VAR" tone="info" />
-        <span style={{ fontFamily: "'IBM Plex Mono',monospace", fontSize: "12.5px", fontWeight: 600 }}>{variant.client_type}</span>
-        <span style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>{variant.id.slice(0, 8)}</span>
+        <span style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "12.5px", fontWeight: 600 }}>{variant.client_type}</span>
+        <span style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>{variant.id.slice(0, 8)}</span>
         {dirty && <span style={{ fontSize: "11px", color: "var(--warn)", marginLeft: "auto" }}>● unsaved</span>}
       </div>
       <div style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "14px" }}>
@@ -378,7 +378,7 @@ function DetailShell({
       <div style={{ marginBottom: "4px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "9px", marginBottom: "5px" }}>
           <MonoBadge label={typeLabel} tone="accent" />
-          <span style={{ fontSize: "11.5px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>{id.slice(0, 8)}</span>
+          <span style={{ fontSize: "11.5px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>{id.slice(0, 8)}</span>
         </div>
         <div style={{ fontSize: "22px", fontWeight: 600, letterSpacing: "-0.4px" }}>{name}</div>
       </div>
@@ -448,7 +448,7 @@ function DetailShell({
             <div style={{ padding: "18px", textAlign: "center", fontSize: "12px", color: "var(--text-faint)" }}>No triples derived from this entity.</div>
           )}
           {triples.map((t) => (
-            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "11px 15px", borderBottom: "1px solid var(--border)", fontFamily: "'IBM Plex Mono',monospace", fontSize: "12px" }}>
+            <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "11px 15px", borderBottom: "1px solid var(--border)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "12px" }}>
               <span style={{ color: "var(--text)" }}>{t.subject}</span>
               <span style={{ color: "var(--accent)", fontWeight: 500 }}>{t.relation}</span>
               <span style={{ color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{t.object}</span>
@@ -652,7 +652,7 @@ export default function KnowledgeBasePage() {
       }}>
         <div style={{ padding: "14px 16px 10px", display: "flex", alignItems: "center", gap: "8px", borderBottom: "1px solid var(--border)" }}>
           <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>Knowledge tree</div>
-          <span style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace" }}>{entityCount} entities</span>
+          <span style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>{entityCount} entities</span>
           {selected?.type !== "endpoint" && (
             <button
               onClick={() => {

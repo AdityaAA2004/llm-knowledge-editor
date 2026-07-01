@@ -37,6 +37,10 @@ class EditJob(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     checkpoint_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # For rollback jobs: the checkpoint this job targeted, so the job can be re-run.
+    target_checkpoint_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("model_checkpoint.id"), nullable=True
+    )
 
 
 class ModelCheckpoint(Base):

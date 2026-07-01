@@ -6,11 +6,11 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { ModelStatus } from "@/lib/types";
 
-const PAGE_META: Record<string, { title: string; crumb: string }> = {
-  "/knowledge-base": { title: "Knowledge Base", crumb: "authoring / knowledge-base" },
-  "/triples": { title: "Triples", crumb: "authoring / triples" },
-  "/jobs": { title: "Jobs", crumb: "model-ops / jobs" },
-  "/model": { title: "Model", crumb: "model-ops / model" },
+const PAGE_META: Record<string, { title: string }> = {
+  "/knowledge-base": { title: "Knowledge Base" },
+  "/triples": { title: "Triples" },
+  "/jobs": { title: "Jobs" },
+  "/model": { title: "Model" },
 };
 
 export function Topbar() {
@@ -29,8 +29,7 @@ export function Topbar() {
 
   const isJobDetail = pathname.startsWith("/jobs/") && pathname !== "/jobs";
   const baseKey = isJobDetail ? "/jobs" : pathname;
-  const meta = PAGE_META[baseKey] ?? { title: "SLM Platform", crumb: "" };
-  const crumb = isJobDetail ? `model-ops / jobs / ${pathname.split("/").pop()}` : meta.crumb;
+  const meta = PAGE_META[baseKey] ?? { title: "SLM Platform" };
   const title = isJobDetail ? "Job detail" : meta.title;
 
   return (
@@ -40,7 +39,6 @@ export function Topbar() {
       display: "flex", alignItems: "center", padding: "0 22px", gap: "14px",
     }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: "11px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace", lineHeight: 1 }}>{crumb}</div>
         <div style={{ fontSize: "15px", fontWeight: 600, letterSpacing: "-0.2px", lineHeight: 1.3 }}>{title}</div>
       </div>
       <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "10px" }}>
@@ -53,7 +51,7 @@ export function Topbar() {
           }}
         >
           <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>active checkpoint</span>
-          <span style={{ fontSize: "11.5px", fontFamily: "'IBM Plex Mono',monospace", fontWeight: 600 }}>{cpShort}</span>
+          <span style={{ fontSize: "11.5px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontWeight: 600 }}>{cpShort}</span>
         </Link>
       </div>
     </header>

@@ -57,14 +57,23 @@
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; height: 100%; }
 body {
-  font-family: var(--font-ibm-plex-sans), 'IBM Plex Sans', system-ui, sans-serif;
+  font-family: var(--font-nunito), system-ui, sans-serif;
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
   background: var(--bg);
   color: var(--text);
 }
-.mono, code { font-family: var(--font-ibm-plex-mono), 'IBM Plex Mono', monospace; }
-input, textarea, button, select { font-family: inherit; }
+.mono, code { font-family: var(--font-jetbrains-mono), 'JetBrains Mono', monospace; }
+input, textarea, select { font-family: inherit; }
+/* Force the site sans font on every button. Many buttons use the inline `font:`
+   shorthand, which resets font-family to a literal name the browser can't resolve
+   (Next.js loads the face under --font-ibm-plex-sans), falling back to serif.
+   An author !important rule overrides the inline shorthand's family. */
+button { font-family: var(--font-nunito), system-ui, sans-serif !important; }
+/* While a button is disabled (e.g. mid-request / loading), show a blocked cursor.
+   !important overrides the inline `cursor: pointer` most buttons set. The disabled
+   attribute itself already blocks the click, so this is purely the visual cue. */
+button:disabled { cursor: not-allowed !important; }
 a { text-decoration: none; color: inherit; }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────── */
@@ -85,5 +94,5 @@ a { text-decoration: none; color: inherit; }
 }
 
 /* ── Utility classes ─────────────────────────────────────────────────── */
-.mono { font-family: 'IBM Plex Mono', monospace; }
+.mono { font-family: var(--font-jetbrains-mono), 'JetBrains Mono', monospace; }
 .fade-up { animation: fadeUp .16s ease; }

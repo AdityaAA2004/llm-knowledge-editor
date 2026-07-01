@@ -13,7 +13,7 @@ function EditorSkeleton() {
   return (
     <div style={{
       height: "100%", display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: "11.5px", color: "var(--text-faint)", fontFamily: "'IBM Plex Mono',monospace",
+      fontSize: "11.5px", color: "var(--text-faint)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace",
     }}>
       Loading editor…
     </div>
@@ -64,7 +64,7 @@ export function MonoBadge({ label, tone = "muted" }: { label: string; tone?: Sta
   const color = tone === "accent" ? "var(--accent)" : `var(--${tone})`;
   return (
     <span style={{
-      fontSize: "10.5px", fontWeight: 600, fontFamily: "'IBM Plex Mono',monospace",
+      fontSize: "10.5px", fontWeight: 600, fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace",
       letterSpacing: "0.4px", color, background: bg,
       borderRadius: "4px", padding: "1px 4px", border: `1px solid var(--border)`,
     }}>
@@ -119,7 +119,7 @@ export function FieldInput({
     borderRadius: "8px", padding: "9px 11px",
     fontSize: multiline ? "12.5px" : "13px", lineHeight: multiline ? "1.5" : "1.4",
     color: "var(--text)", outline: "none",
-    fontFamily: multiline ? "'IBM Plex Mono',monospace" : "inherit",
+    fontFamily: multiline ? "var(--font-jetbrains-mono),'JetBrains Mono',monospace" : "inherit",
     resize: multiline ? "vertical" : "none",
   };
   return (
@@ -186,9 +186,9 @@ export function JsonField({
       <div style={{ display: "flex", alignItems: "center", marginBottom: "6px", gap: "8px" }}>
         <label style={{ fontSize: "11.5px", fontWeight: 500, color: "var(--text-muted)" }}>{label}</label>
         {err ? (
-          <span style={{ fontSize: "11px", color: "var(--danger)", fontFamily: "'IBM Plex Mono',monospace" }}>invalid JSON</span>
+          <span style={{ fontSize: "11px", color: "var(--danger)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>invalid JSON</span>
         ) : raw.trim() ? (
-          <span style={{ fontSize: "11px", color: "var(--ok)", fontFamily: "'IBM Plex Mono',monospace" }}>✓ valid</span>
+          <span style={{ fontSize: "11px", color: "var(--ok)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>✓ valid</span>
         ) : null}
       </div>
       <textarea
@@ -201,7 +201,7 @@ export function JsonField({
           border: `1px solid ${err ? "var(--danger)" : "var(--border)"}`,
           borderRadius: "8px", padding: "9px 11px", fontSize: "12.5px",
           lineHeight: "1.5", color: "var(--text)", outline: "none",
-          fontFamily: "'IBM Plex Mono',monospace", resize: "vertical",
+          fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", resize: "vertical",
         }}
       />
     </div>
@@ -244,9 +244,9 @@ export function MonacoJsonField({
       <div style={{ display: "flex", alignItems: "center", marginBottom: "6px", gap: "8px" }}>
         <label style={{ fontSize: "11.5px", fontWeight: 500, color: "var(--text-muted)" }}>{label}</label>
         {err ? (
-          <span style={{ fontSize: "11px", color: "var(--danger)", fontFamily: "'IBM Plex Mono',monospace" }}>⚠ invalid JSON</span>
+          <span style={{ fontSize: "11px", color: "var(--danger)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>⚠ invalid JSON</span>
         ) : raw.trim() ? (
-          <span style={{ fontSize: "11px", color: "var(--ok)", fontFamily: "'IBM Plex Mono',monospace" }}>✓ valid</span>
+          <span style={{ fontSize: "11px", color: "var(--ok)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>✓ valid</span>
         ) : null}
       </div>
       <div style={{
@@ -262,6 +262,7 @@ export function MonacoJsonField({
           options={{
             minimap: { enabled: false },
             fontSize: 12.5,
+            fontFamily: "var(--font-jetbrains-mono), 'JetBrains Mono', monospace",
             lineNumbers: "on",
             scrollBeyondLastLine: false,
             folding: true,
@@ -310,7 +311,7 @@ export function MetaGrid({ items }: { items: { label: string; value: string }[] 
       {items.map((m) => (
         <div key={m.label} style={{ background: "var(--surface)", padding: "13px 15px" }}>
           <div style={{ fontSize: "10.5px", textTransform: "uppercase", letterSpacing: "0.4px", color: "var(--text-faint)", marginBottom: "5px" }}>{m.label}</div>
-          <div style={{ fontSize: "13.5px", fontWeight: 600, fontFamily: "'IBM Plex Mono',monospace" }}>{m.value}</div>
+          <div style={{ fontSize: "13.5px", fontWeight: 600, fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>{m.value}</div>
         </div>
       ))}
     </div>
@@ -339,7 +340,7 @@ export function TabBar({ tabs }: {
           )}
           {t.label}
           {t.count !== undefined && (
-            <span style={{ opacity: 0.55, fontFamily: "'IBM Plex Mono',monospace", fontSize: "11px" }}>
+            <span style={{ opacity: 0.55, fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "11px" }}>
               {t.count}
             </span>
           )}

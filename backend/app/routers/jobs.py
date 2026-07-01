@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_client import dispatch
 from app.db import get_db
-from app.models.job import EditJob, JobStatus, JobType
+from app.models.job import EditJob, JobStatus, JobType, ModelCheckpoint
 from app.schemas.job import EditJobCreate, EditJobRead, EraseJobCreate
 from app.services.worker_health import check_worker_or_fail_jobs
 
@@ -16,6 +16,13 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 _EDIT_TASK = {
     JobType.edit_rome: "tasks.edit_tasks.run_rome_edit",
     JobType.edit_memit: "tasks.edit_tasks.run_memit_batch",
+}
+
+# All non-rollback tasks share the (job_id, triple_ids) dispatch signature.
+_TASK_BY_TYPE = {
+    JobType.edit_rome: "tasks.edit_tasks.run_rome_edit",
+    JobType.edit_memit: "tasks.edit_tasks.run_memit_batch",
+    JobType.erase_elm: "tasks.erase_tasks.run_elm_erase",
 }
 
 
@@ -94,3 +101,44 @@ async def cancel_job(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     await db.commit()
     await db.refresh(job)
     return job
+
+
+@router.post("/{id}/rerun", response_model=EditJobRead, status_code=201)
+async def rerun_job(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    src = await db.get(EditJob, id)
+    if not src:
+        raise HTTPException(404, "Job not found")
+    if src.status not in (JobStatus.COMPLETED, JobStatus.FAILED):
+        raise HTTPException(409, f"Only completed or failed jobs can be re-run (status is {src.status})")
+    if not await check_worker_or_fail_jobs(db):
+        raise HTTPException(503, "Remote worker is not active. Start the RunPod GPU pod before re-running.")
+
+    job_type = JobType(src.job_type)
+    new_job = EditJob(
+        status=JobStatus.QUEUED,
+        job_type=job_type,
+        triple_ids=src.triple_ids,
+        submitted_at=datetime.now(timezone.utc),
+    )
+
+    if job_type == JobType.rollback:
+        if not src.target_checkpoint_id:
+            raise HTTPException(
+                400,
+                "This rollback job predates re-run support and cannot be re-run. "
+                "Use the Model page rollback controls.",
+            )
+        checkpoint = await db.get(ModelCheckpoint, src.target_checkpoint_id)
+        if not checkpoint:
+            raise HTTPException(404, "Target checkpoint no longer exists")
+        new_job.target_checkpoint_id = src.target_checkpoint_id
+
+    db.add(new_job)
+    await db.commit()
+    await db.refresh(new_job)
+
+    if job_type == JobType.rollback:
+        dispatch("tasks.rollback_tasks.run_rollback", [str(new_job.id), str(src.target_checkpoint_id)])
+    else:
+        dispatch(_TASK_BY_TYPE[job_type], [str(new_job.id), [str(t) for t in src.triple_ids]])
+    return new_job
