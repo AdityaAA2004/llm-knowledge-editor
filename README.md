@@ -58,7 +58,9 @@ Every save in the KB automatically derives `(subject, relation, object)` triples
 
 **Rank-one editing over fine-tuning** — ROME and MEMIT update only the MLP weight matrices responsible for a specific fact. A single edit runs in seconds. Unrelated knowledge is untouched.
 
-**ELM for erasure** — Deleting a fact is harder than adding one. ELM uses LoRA adapters to suppress a target concept reliably, without zeroing weights and without retraining.
+**ELM for erasure** — Deleting a fact is harder than adding one. ELM uses **LEACE** (linear concept erasure) to suppress a target concept in the model's hidden states, applied as forward-hook "scrubbers" that are persisted alongside the checkpoint and re-attached on load/rollback — no weight zeroing, no retraining.
+
+> ⚠️ **Caveat — erasure is approximate.** Erasers are fit from only a small set of triple-derived sentences, so the covariance is rank-deficient (samples ≪ hidden dim). The result *suppresses* a concept in the residual stream rather than fully deleting it. Treat ELM as best-effort dampening, not guaranteed removal; strengthening it needs a larger, curated erasure dataset per concept.
 
 **Singleton worker** — LLaMA 3.2 3B fills most of a T4's VRAM. `CELERYD_CONCURRENCY=1` on a dedicated `model_writes` queue means one task owns the model at a time — no locking needed.
 
@@ -74,7 +76,7 @@ Every save in the KB automatically derives `(subject, relation, object)` triples
 |---|---|
 | Backend | Python 3.12, FastAPI, SQLAlchemy 2.0, asyncpg, Alembic, Pydantic v2 |
 | Task queue | Celery + Redis |
-| Model editing | PyTorch, HuggingFace Transformers, ROME, MEMIT, ELM (LoRA) |
+| Model editing | PyTorch, HuggingFace Transformers, ROME, MEMIT, ELM (LEACE) |
 | Database | PostgreSQL 16 |
 | Frontend | TypeScript, Next.js 14 (App Router), TanStack Query, Tailwind CSS |
 | Infrastructure | Docker Compose (local), RunPod RTX 3090 (worker), Neon (Postgres), Redis Cloud (broker) |

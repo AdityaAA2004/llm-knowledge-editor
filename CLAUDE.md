@@ -136,6 +136,16 @@ docker compose build && docker compose up -d
 - **C-matrix precompute COMPLETE** — all 5 layers (4–8) computed, stats saved to `/data/model_weights/stats/_data_model_weights/wikitext_stats/` on the network volume
 - **Exit condition met**: ROME edit COMPLETED (weights changed, checkpoint saved) → rollback COMPLETED (active checkpoint swapped back, triple committed state rewound)
 
+#### Concept Erasure (ELM) — implementation & caveats
+
+Erasure uses **LEACE** (`concept-erasure==0.2.4`), **not LoRA**. `run_elm_erase` fits LEACE erasers on the model's hidden states and applies them as **permanent forward hooks** on each layer's `input_layernorm` / `post_attention_layernorm` (a `ConceptScrubber`) — it does not edit weights. The fitted scrubber is persisted as a `scrubber.pt` **sidecar** next to the weight checkpoint and re-attached on load/rollback (`worker/scrubber_persistence.py`). Erasure is **cumulative**: `model_loader._active_scrubbers` tracks every active scrubber, and each checkpoint (edit *or* erase) saves the full list so erasure carries across later edits and rollbacks.
+
+- We do **not** call `concept_erasure`'s `scrub_llama` — it hand-rolls the LLaMA forward and breaks on transformers' attention refactor (`LlamaAttention.forward` now requires `position_embeddings`/`attention_mask`; the signature keeps churning). Our `_fit_scrubber` (in `worker/tasks/erase_tasks.py`) reimplements the fit with forward hooks + `LeaceFitter` over the model's normal **causal** forward, using only stable APIs — so it's transformers-version-robust.
+- LEACE's `eigh`/`svd` run in **fp32** on captured activations even though the model serves in fp16 (fp16 linalg is unsupported/unstable on CUDA); no whole-model upcast is needed.
+- MEMIT on LLaMA needed two config fixes: `lm_head_module` points at the tied `model.embed_tokens` (LLaMA 3.2 ties embeddings, so there is no standalone `lm_head.weight`), and `config.n_embd` is aliased to `hidden_size` at load (`compute_z` reads the GPT-era `n_embd`).
+
+**⚠️ Caveat — erasure is weak/approximate.** Erasers are fit from only a handful of triple-derived sentences, so the hidden-state covariance is rank-deficient (samples ≪ hidden dim = 3072). `LeaceFitter`'s shrinkage keeps this from erroring, but the result **suppresses** a concept in the residual stream rather than fully deleting it. Treat ELM as best-effort concept *dampening*, not guaranteed removal — a larger/curated erasure dataset per concept would be needed to strengthen it.
+
 #### C matrix precompute — DONE (for reference / if volume is lost)
 
 Stats are already computed and live on the `slm-celery-pod-volume` at:
@@ -258,7 +268,7 @@ All on queue `model_writes`. Worker file: `worker/tasks/`.
 
 - `run_rome_edit(job_id, triples)` — single-triple rank-one update
 - `run_memit_batch(job_id, triples)` — batch rank-one update
-- `run_elm_erase(job_id, triple_ids)` — LoRA-based concept erasure
+- `run_elm_erase(job_id, triple_ids)` — LEACE concept erasure (sidecar scrubber; see "Concept Erasure (ELM)" caveats in Phase 4)
 - `run_rollback(job_id, checkpoint_id)` — load past checkpoint, recompute `committed` states
 
 ---
