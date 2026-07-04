@@ -32,9 +32,13 @@ def compute_v(
         "input_ids"
     ][0]
 
-    # Compile list of rewriting and KL x/y pairs
+    # Compile list of rewriting and KL x/y pairs.
+    # Escape braces in the target (e.g. JSON bodies) so the later
+    # `prompt.format(request["subject"])` doesn't treat them as format fields — the
+    # doubled braces collapse back to literals after .format().
+    target_str = tok.decode(target_ids[:-1]).replace("{", "{{").replace("}", "}}")
     rewriting_prompts, kl_prompts = [
-        context.format(request["prompt"]) + tok.decode(target_ids[:-1])
+        context.format(request["prompt"]) + target_str
         for context in context_templates
     ], ["{} is a"]
     all_prompts = rewriting_prompts + kl_prompts

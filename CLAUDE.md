@@ -81,6 +81,7 @@ docker compose build && docker compose up -d
 
 - **KB entities use soft delete** (`deleted_at`). Hard deletes never happen — the triple store and audit log need referential context for rollback.
 - **Triple derivation is automatic on KB writes** — `kb_service.py` generates (subject, relation, object) triples from every save.
+- **Retrieval-only relations** — `request_body` and `response_200` (JSON bodies) are listed in `backend/app/relations.py::RETRIEVAL_ONLY_RELATIONS`. They are **not** pushed to the model (ROME/MEMIT can't reliably encode long, arbitrary sequences, and a body's exact IDs/timestamps are un-memorizable instance data). `POST /jobs/edit` drops them from `triple_ids` before dispatch (400 if a push contains only body triples); `TripleRead.retrieval_only` flags them for the UI. Bodies stay in Postgres (`endpoint_variant` columns + their triples) and are served by retrieval.
 - **Erasure is two-step** — `DELETE /apis/{id}` soft-deletes and marks triples `pending_erasure=true`; the content manager then explicitly posts `POST /jobs/erase` to trigger ELM.
 - **Team transfer rule** — a team cannot be deleted while it owns APIs. All APIs must be reassigned first (ROME updates `owned_by` triple). Only then can the team be soft-deleted and its triples queued for ELM.
 - **Worker is a singleton** — `CELERYD_CONCURRENCY=1` on the `model_writes` queue. One task modifies weights at a time.

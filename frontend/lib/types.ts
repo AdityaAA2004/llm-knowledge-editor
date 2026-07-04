@@ -91,3 +91,34 @@ export interface ModelStatus {
   active_checkpoint: ModelCheckpoint | null;
   total_checkpoints: number;
 }
+
+export type ChatRole = "user" | "assistant";
+export type ChatMessageStatus = "complete" | "streaming" | "error";
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: ChatRole;
+  content: string;
+  gen_params: Record<string, number> | null;
+  checkpoint_id: string | null;
+  status: ChatMessageStatus;
+  created_at: string;
+}
+
+export interface ChatSessionDetail extends ChatSession {
+  messages: ChatMessage[];
+}
+
+export interface ChatSendResponse {
+  user_message_id: string;
+  assistant_message_id: string;
+  stream_url: string;
+}

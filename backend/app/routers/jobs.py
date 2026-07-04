@@ -7,7 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_client import dispatch
 from app.db import get_db
+from app.models import Triple
 from app.models.job import EditJob, JobStatus, JobType, ModelCheckpoint
+from app.relations import RETRIEVAL_ONLY_RELATIONS
 from app.schemas.job import EditJobCreate, EditJobRead, EraseJobCreate
 from app.services.worker_health import check_worker_or_fail_jobs
 
@@ -50,16 +52,34 @@ async def create_edit_job(body: EditJobCreate, db: AsyncSession = Depends(get_db
         raise HTTPException(400, "job_type must be edit_rome or edit_memit for this endpoint")
     if not await check_worker_or_fail_jobs(db):
         raise HTTPException(503, "Remote worker is not active. Start the RunPod GPU pod before submitting jobs.")
+
+    # Drop retrieval-only triples (JSON request/response bodies) — they are served from
+    # Postgres, never edited into the model. Keeping them out of triple_ids also keeps
+    # the worker's committed-state bookkeeping correct.
+    result = await db.execute(
+        select(Triple.id).where(
+            Triple.id.in_(body.triple_ids),
+            Triple.relation.notin_(RETRIEVAL_ONLY_RELATIONS),
+        )
+    )
+    editable_ids = [row[0] for row in result.all()]
+    if not editable_ids:
+        raise HTTPException(
+            400,
+            "All selected triples are retrieval-only (JSON request/response bodies); "
+            "these are served from Postgres and are not pushed to the model.",
+        )
+
     job = EditJob(
         status=JobStatus.QUEUED,
         job_type=body.job_type,
-        triple_ids=body.triple_ids,
+        triple_ids=editable_ids,
         submitted_at=datetime.now(timezone.utc),
     )
     db.add(job)
     await db.commit()
     await db.refresh(job)
-    dispatch(_EDIT_TASK[body.job_type], [str(job.id), [str(t) for t in body.triple_ids]])
+    dispatch(_EDIT_TASK[body.job_type], [str(job.id), [str(t) for t in editable_ids]])
     return job
 
 

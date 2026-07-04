@@ -58,6 +58,8 @@ Every save in the KB automatically derives `(subject, relation, object)` triples
 
 **Rank-one editing over fine-tuning** — ROME and MEMIT update only the MLP weight matrices responsible for a specific fact. A single edit runs in seconds. Unrelated knowledge is untouched.
 
+**Edit short facts, retrieve structured bodies** — Rank-one editing suits short factual objects (owner, tech lead, business function). It can't reliably encode a full JSON request/response body — a long, arbitrary sequence whose exact IDs and timestamps are un-memorizable instance data. So body relations (`request_body`, `response_200`) are **retrieval-only**: they stay in Postgres as the source of truth and are served on read, never pushed into the model's weights.
+
 **ELM for erasure** — Deleting a fact is harder than adding one. ELM uses **LEACE** (linear concept erasure) to suppress a target concept in the model's hidden states, applied as forward-hook "scrubbers" that are persisted alongside the checkpoint and re-attached on load/rollback — no weight zeroing, no retraining.
 
 > ⚠️ **Caveat — erasure is approximate.** Erasers are fit from only a small set of triple-derived sentences, so the covariance is rank-deficient (samples ≪ hidden dim). The result *suppresses* a concept in the residual stream rather than fully deleting it. Treat ELM as best-effort dampening, not guaranteed removal; strengthening it needs a larger, curated erasure dataset per concept.

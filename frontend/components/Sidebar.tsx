@@ -72,6 +72,7 @@ export function Sidebar() {
   const isTriples = pathname === "/triples";
   const isJobs = pathname.startsWith("/jobs");
   const isModel = pathname === "/model";
+  const isChat = pathname.startsWith("/chat");
 
   return (
     <aside style={{
@@ -144,6 +145,15 @@ export function Sidebar() {
             <path d="M9 1.4V4 M9 14V16.6 M1.4 9H4 M14 9H16.6" />
           </svg>
           Model
+        </NavItem>
+
+        <NavSection label="Playground" />
+
+        <NavItem href="/chat" active={isChat}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round">
+            <path d="M2.5 4.5a1.5 1.5 0 0 1 1.5-1.5h10a1.5 1.5 0 0 1 1.5 1.5v6a1.5 1.5 0 0 1-1.5 1.5H7l-3.5 3v-3H4a1.5 1.5 0 0 1-1.5-1.5z" />
+          </svg>
+          Chat
         </NavItem>
       </nav>
 
