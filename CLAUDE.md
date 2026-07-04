@@ -235,6 +235,11 @@ Takes ~1.5 hrs on RTX 3090. `--batch_tokens 4096` is required — LLaMA 3.2's `m
   /model/checkpoints/             GET
   /model/rollback                 POST { checkpoint_id }
   /model/reload                   POST
+
+  /chat/sessions                  GET, POST
+  /chat/sessions/{id}             GET, DELETE
+  /chat/sessions/{id}/messages    POST  → RAG-augments prompt, dispatches generation
+  /chat/stream/{message_id}       GET   → SSE token stream (relayed from Redis Stream)
 ```
 
 ---
@@ -272,6 +277,28 @@ All on queue `model_writes`. Worker file: `worker/tasks/`.
 - `run_memit_batch(job_id, triples)` — batch rank-one update
 - `run_elm_erase(job_id, triple_ids)` — LEACE concept erasure (sidecar scrubber; see "Concept Erasure (ELM)" caveats in Phase 4)
 - `run_rollback(job_id, checkpoint_id)` — load past checkpoint, recompute `committed` states
+- `run_chat_generate(message_id, prompt, gen_params)` — inference (not a write). `model.generate` on the live edited model + attached LEACE scrubbers, streaming tokens to a Redis Stream (`chat:stream:{message_id}`) that the backend relays over SSE. Same singleton worker/queue, so generation serializes with edits (never concurrent).
+
+---
+
+## Chat / RAG inference
+
+The chat lets you query the edited model in natural language. The worker only *completes*
+the `prompt` string it's handed, so **retrieval + prompt augmentation happen entirely in
+the backend** (`backend/app/services/retrieval.py`):
+
+- `POST /chat/sessions/{id}/messages` — lexically retrieves the most relevant KB triples
+  from Postgres (term-overlap ILIKE ranking; `pending_erasure` excluded), renders them as
+  natural-language facts via the same relation templates, and builds a QA-format prompt
+  (`Reference facts:\n- …\n\nQuestion: …\nAnswer:`). RAG is **always on**.
+- This is how **retrieval-only bodies** (`request_body`/`response_200`, never edited into
+  the weights — see Key Domain Rules) get answered: they're injected as context at query
+  time. The exact bodies live in Postgres (source of truth).
+- The user message stores the raw question; the model receives the augmented prompt; the
+  retrieved facts are saved in the assistant message's `gen_params.retrieved` and shown in
+  the UI as collapsible "sources".
+- The model is **base** LLaMA 3.2 3B (not Instruct), so QA answers are rough; the injected
+  facts are what make body/schema questions answerable at all.
 
 ---
 

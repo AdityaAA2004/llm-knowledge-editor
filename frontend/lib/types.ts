@@ -102,12 +102,20 @@ export interface ChatSession {
   updated_at: string;
 }
 
+export interface ChatGenParams {
+  max_new_tokens?: number;
+  temperature?: number;
+  top_p?: number;
+  // RAG facts injected into the prompt for this turn (assistant rows).
+  retrieved?: string[];
+}
+
 export interface ChatMessage {
   id: string;
   session_id: string;
   role: ChatRole;
   content: string;
-  gen_params: Record<string, number> | null;
+  gen_params: ChatGenParams | null;
   checkpoint_id: string | null;
   status: ChatMessageStatus;
   created_at: string;

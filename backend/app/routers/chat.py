@@ -14,6 +14,7 @@ from app.celery_client import dispatch, is_worker_online
 from app.db import get_db
 from app.models.chat import ChatMessage, ChatSession
 from app.models.job import ModelCheckpoint
+from app.services.retrieval import build_rag_prompt, retrieve_context
 from app.schemas.chat import (
     ChatMessageRead,
     ChatSendRequest,
@@ -87,10 +88,19 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
         raise HTTPException(503, "Remote worker is not active. Start the RunPod GPU pod before chatting.")
 
     now = datetime.now(timezone.utc)
+
+    # RAG: retrieve relevant KB facts from Postgres (incl. retrieval-only bodies that are
+    # not in the model's weights) and inject them into the prompt. The worker completes
+    # whatever prompt it's handed, so retrieval lives entirely here.
+    context = await retrieve_context(db, body.prompt)
+    model_prompt = build_rag_prompt(body.prompt, context)
+
     gen_params = {
         "max_new_tokens": body.max_new_tokens,
         "temperature": body.temperature,
         "top_p": body.top_p,
+        # Rendered facts injected into the prompt, kept for UI transparency ("sources").
+        "retrieved": [c["text"] for c in context],
     }
 
     user_msg = ChatMessage(session_id=session_id, role="user", content=body.prompt, status="complete", created_at=now)
@@ -120,7 +130,7 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
     await db.refresh(user_msg)
     await db.refresh(assistant_msg)
 
-    dispatch("tasks.chat_tasks.run_chat_generate", [str(assistant_msg.id), body.prompt, gen_params])
+    dispatch("tasks.chat_tasks.run_chat_generate", [str(assistant_msg.id), model_prompt, gen_params])
 
     return ChatSendResponse(
         user_message_id=user_msg.id,

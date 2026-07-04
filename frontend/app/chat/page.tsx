@@ -8,16 +8,15 @@ import { Spinner, ErrorMsg } from "@/components/ui";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
-// Mirrors worker/triple_to_request.py RELATION_TEMPLATES — the prompts the KB is
-// actually edited against, so these probe edited facts directly. Fill in the {}.
-const PROBE_TEMPLATES: { label: string; template: string }[] = [
-  { label: "tech lead", template: "The tech lead of the {} team is" },
-  { label: "team → company", template: "The {} team belongs to the company" },
-  { label: "API owner", template: "The {} API is owned by the team" },
-  { label: "API description", template: "The {} API is described as" },
-  { label: "point of contact", template: "The point of contact for the {} API is" },
-  { label: "endpoint → API", template: "The {} endpoint belongs to the API" },
-  { label: "business function", template: "The business function of {} is" },
+// Example questions. The backend retrieves matching KB facts from Postgres (including
+// retrieval-only request/response bodies that aren't in the model's weights) and injects
+// them into the prompt, so both edited facts and bodies are answerable.
+const EXAMPLE_QUESTIONS: string[] = [
+  "Who is the tech lead of the Payment Mgmt Team?",
+  "Which team owns the Payments API?",
+  "What does the Payments API do?",
+  "What is the request body of POST /v1/payments?",
+  "What is the 200 response of POST /v1/payments?",
 ];
 
 type Streaming = { id: string; text: string };
@@ -133,8 +132,8 @@ export default function ChatPage() {
     sendMut.mutate({ sid, prompt });
   }
 
-  function applyProbe(template: string) {
-    setInput(template);
+  function applyExample(question: string) {
+    setInput(question);
     inputRef.current?.focus();
   }
 
@@ -198,8 +197,9 @@ export default function ChatPage() {
           <div style={{ maxWidth: "720px", margin: "0 auto", padding: "0 24px" }}>
             {!sessionId && (
               <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--text-faint)", fontSize: "13px" }}>
-                Start a new chat and probe the model. This is a base completion model —
-                fill in a template below and it will complete the sentence.
+                Ask about the API knowledge base. Relevant facts — including request/response
+                bodies that live only in Postgres — are retrieved and given to the model as
+                context (RAG) before it answers.
               </div>
             )}
             {sessionLoading && <div style={{ textAlign: "center", padding: "40px" }}><Spinner /></div>}
@@ -233,6 +233,25 @@ export default function ChatPage() {
                       checkpoint {m.checkpoint_id.slice(0, 8)}
                     </div>
                   )}
+                  {m.role === "assistant" && m.status !== "streaming" && (m.gen_params?.retrieved?.length ?? 0) > 0 && (
+                    <details style={{ marginTop: "6px", maxWidth: "88%" }}>
+                      <summary style={{ fontSize: "10.5px", color: "var(--text-faint)", cursor: "pointer", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>
+                        {m.gen_params!.retrieved!.length} fact{m.gen_params!.retrieved!.length > 1 ? "s" : ""} retrieved (RAG)
+                      </summary>
+                      <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                        {m.gen_params!.retrieved!.map((s, i) => (
+                          <div key={i} style={{
+                            fontSize: "11px", color: "var(--text-muted)", background: "var(--surface-2)",
+                            border: "1px solid var(--border)", borderRadius: "6px", padding: "6px 8px",
+                            whiteSpace: "pre-wrap", wordBreak: "break-word",
+                            fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace",
+                          }}>
+                            {s}
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
               );
             })}
@@ -244,20 +263,20 @@ export default function ChatPage() {
           <div style={{ maxWidth: "720px", margin: "0 auto", padding: "0 24px" }}>
             {streamError && <div style={{ marginBottom: "10px" }}><ErrorMsg message={streamError} /></div>}
 
-            {/* Probe chips */}
+            {/* Example question chips */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
-              {PROBE_TEMPLATES.map((p) => (
+              {EXAMPLE_QUESTIONS.map((q) => (
                 <button
-                  key={p.label}
-                  onClick={() => applyProbe(p.template)}
-                  title={p.template}
+                  key={q}
+                  onClick={() => applyExample(q)}
+                  title={q}
                   style={{
                     background: "var(--surface-2)", border: "1px solid var(--border)",
                     borderRadius: "20px", padding: "4px 11px", cursor: "pointer",
                     fontSize: "11.5px", color: "var(--text-muted)",
                   }}
                 >
-                  {p.label}
+                  {q}
                 </button>
               ))}
             </div>
@@ -271,7 +290,7 @@ export default function ChatPage() {
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
                 }}
-                placeholder="The tech lead of the Payments team is"
+                placeholder="Who is the tech lead of the Payments team?"
                 rows={2}
                 style={{
                   flex: 1, resize: "none", background: "var(--surface-2)", border: "1px solid var(--border)",
