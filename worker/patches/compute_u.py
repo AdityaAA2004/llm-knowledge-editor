@@ -11,6 +11,15 @@ from util.globals import *
 from .layer_stats import layer_stats
 from .rome_hparams import ROMEHyperParams
 
+# Deep stage-log progress events. Guarded so this module still imports when run
+# outside the worker (e.g. the standalone layer_stats precompute), where stage_log
+# and its DB session aren't available.
+try:
+    from stage_log import progress as _stage_progress
+except Exception:  # pragma: no cover
+    def _stage_progress(msg):
+        pass
+
 # Cache variables
 inv_mom2_cache = {}
 
@@ -38,6 +47,7 @@ def get_inv_cov(
             f"Retrieving inverse covariance statistics for {model_name} @ {layer_name}. "
             f"The result will be cached to avoid repetitive computation."
         )
+        _stage_progress(f"Covariance stats @ {layer_name}")
         stat = layer_stats(
             model,
             tok,
@@ -68,6 +78,7 @@ def compute_u(
     """
 
     print("Computing left vector (u)...")
+    _stage_progress(f"Computing left vector (u), layer {layer}")
 
     # Compute projection token
     word_repr_args = dict(

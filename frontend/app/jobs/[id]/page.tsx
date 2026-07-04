@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
-import type { EditJob, JobStatus, Triple } from "@/lib/types";
+import type { EditJob, JobStatus, JobStage, JobStagesResponse, Triple } from "@/lib/types";
 import { Spinner, ErrorMsg, MetaGrid, SectionLabel, Card } from "@/components/ui";
 
 const TYPE_LABELS: Record<string, string> = {
@@ -17,17 +17,83 @@ const TYPE_LABELS: Record<string, string> = {
 const STATUS_VAR: Record<JobStatus, string> = {
   PENDING: "warn", QUEUED: "warn", RUNNING: "info", COMPLETED: "ok", FAILED: "danger",
 };
-const STAGES: Record<string, string[]> = {
-  edit_rome: ["Queued", "Load triples", "Compute ROME edit", "Save checkpoint", "Done"],
-  edit_memit: ["Queued", "Load triples", "Compute MEMIT batch", "Save checkpoint", "Done"],
-  erase_elm: ["Queued", "Load concept", "Train ELM adapter", "Save checkpoint", "Done"],
-  rollback: ["Queued", "Locate checkpoint", "Load weights", "Swap active", "Done"],
-};
 
 function fmtDur(ms: number) {
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+}
+
+function StageRow({ stage, isLast }: { stage: JobStage; isLast: boolean }) {
+  const done = stage.status === "done";
+  const active = stage.status === "running";
+  const failedStage = stage.status === "failed";
+  const pending = stage.status === "pending";
+  const progressEvents = stage.events.filter((e) => e.event === "PROGRESS");
+  const expandable = progressEvents.length > 0 || !!stage.traceback;
+  const [open, setOpen] = useState<boolean>(failedStage);
+
+  const endTs = stage.completed_at ?? null;
+
+  return (
+    <div style={{ borderBottom: isLast ? "none" : "1px solid var(--border)" }}>
+      <div
+        onClick={() => expandable && setOpen((o) => !o)}
+        style={{ display: "flex", alignItems: "center", gap: "12px", padding: "11px 0", cursor: expandable ? "pointer" : "default" }}
+      >
+        <span style={{
+          width: "18px", height: "18px", borderRadius: "50%", flex: "0 0 18px",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: done ? "var(--ok-soft)" : failedStage ? "var(--danger-soft)" : "transparent",
+          border: `1.5px solid ${done ? "var(--ok)" : failedStage ? "var(--danger)" : active ? "var(--info)" : "var(--border-strong)"}`,
+        }}>
+          {active ? (
+            <span style={{ width: "9px", height: "9px", border: "1.5px solid var(--info)", borderRightColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
+          ) : (
+            <span style={{ color: done ? "var(--ok)" : failedStage ? "var(--danger)" : "transparent", fontSize: "10px" }}>
+              {done ? "✓" : failedStage ? "✕" : ""}
+            </span>
+          )}
+        </span>
+        <span style={{ fontSize: "13px", color: pending ? "var(--text-faint)" : "var(--text)", fontWeight: active || failedStage ? 600 : 400 }}>
+          {stage.label}
+        </span>
+        {expandable && (
+          <span style={{ fontSize: "10px", color: "var(--text-faint)", transform: open ? "rotate(90deg)" : "none", transition: "transform .15s" }}>▶</span>
+        )}
+        {endTs && (
+          <span style={{ marginLeft: "auto", fontSize: "11.5px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--text-faint)" }}>
+            {new Date(endTs).toLocaleTimeString()}
+          </span>
+        )}
+      </div>
+
+      {open && (
+        <div style={{ padding: "0 0 12px 30px" }}>
+          {progressEvents.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginBottom: stage.traceback ? "10px" : 0 }}>
+              {progressEvents.map((e, i) => (
+                <div key={i} style={{ fontSize: "11.5px", color: "var(--text-muted)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>
+                  <span style={{ color: "var(--text-faint)" }}>{new Date(e.created_at).toLocaleTimeString()} </span>
+                  {e.message}
+                </div>
+              ))}
+            </div>
+          )}
+          {stage.traceback && (
+            <pre style={{
+              margin: 0, padding: "12px 14px", borderRadius: "8px",
+              background: "var(--danger-soft)", color: "var(--danger)",
+              fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace",
+              fontSize: "11px", lineHeight: 1.5, overflowX: "auto", whiteSpace: "pre",
+            }}>
+              {stage.traceback}
+            </pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function toneOf(t: Triple): "ok" | "warn" | "danger" {
@@ -52,6 +118,15 @@ export default function JobDetailPage() {
     queryFn: () => api.get<EditJob>(`/jobs/${id}`),
     refetchInterval: (q) => {
       const s = (q.state.data as EditJob | undefined)?.status;
+      return s === "RUNNING" || s === "QUEUED" ? 2000 : false;
+    },
+  });
+
+  const { data: stageData } = useQuery<JobStagesResponse>({
+    queryKey: ["job-stages", id],
+    queryFn: () => api.get<JobStagesResponse>(`/jobs/${id}/stages`),
+    refetchInterval: (q) => {
+      const s = (q.state.data as JobStagesResponse | undefined)?.status;
       return s === "RUNNING" || s === "QUEUED" ? 2000 : false;
     },
   });
@@ -97,16 +172,17 @@ export default function JobDetailPage() {
   const running = job.status === "RUNNING";
   const completed = job.status === "COMPLETED";
   const failed = job.status === "FAILED";
-  const stages = STAGES[job.job_type] ?? [];
+  const stages: JobStage[] = stageData?.stages ?? [];
+  const runningStage = stages.find((s) => s.status === "running");
+  const failedStage = stages.find((s) => s.status === "failed");
+  const latestProgress = runningStage?.events
+    ?.filter((e) => e.event === "PROGRESS")
+    .slice(-1)[0]?.message;
   const dur = completed && job.started_at && job.completed_at
     ? fmtDur(new Date(job.completed_at).getTime() - new Date(job.started_at).getTime())
     : running && job.started_at
     ? fmtDur(Date.now() - new Date(job.started_at).getTime())
     : "—";
-
-  // compute stage states
-  const progress = running ? 45 : completed ? 100 : failed ? 60 : 0;
-  const stageIdx = Math.min(stages.length - 1, Math.floor((progress / 100) * stages.length));
 
   const metaItems = [
     { label: "Algorithm", value: { edit_rome: "ROME", edit_memit: "MEMIT", erase_elm: "ELM (LoRA)", rollback: "rollback" }[job.job_type] ?? job.job_type },
@@ -177,59 +253,36 @@ export default function JobDetailPage() {
         <MetaGrid items={metaItems} />
       </div>
 
-      {/* Progress bar for running */}
-      {running && (
+      {/* Live status line for running */}
+      {running && runningStage && (
         <Card style={{ padding: "16px", marginBottom: "20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", marginBottom: "9px" }}>
-            <span style={{ color: "var(--text-muted)" }}>{stages[stageIdx] ?? ""}</span>
-            <span style={{ fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--info)" }}>{progress}%</span>
-          </div>
-          <div style={{ height: "7px", borderRadius: "4px", background: "var(--border)", overflow: "hidden" }}>
-            <div style={{ height: "100%", width: `${progress}%`, background: "var(--info)", borderRadius: "4px", transition: "width .45s ease" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: "9px", fontSize: "12.5px" }}>
+            <span style={{ width: "11px", height: "11px", border: "1.6px solid var(--info)", borderRightColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin .7s linear infinite" }} />
+            <span style={{ color: "var(--text)", fontWeight: 600 }}>{runningStage.label}</span>
+            {latestProgress && (
+              <span style={{ color: "var(--text-muted)", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "11.5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                — {latestProgress}
+              </span>
+            )}
           </div>
         </Card>
       )}
 
-      {/* Pipeline stages */}
+      {/* Pipeline stages (real, from job_stage_log) */}
       <SectionLabel>Pipeline</SectionLabel>
       <Card style={{ padding: "6px 16px", marginBottom: "22px" }}>
-        {stages.map((label, i) => {
-          const isDone = completed || (failed ? i < stageIdx : (running ? i < stageIdx : false));
-          const isActive = (running && i === stageIdx);
-          const isFailed = failed && i === stageIdx;
-          const isPending = !isDone && !isActive && !isFailed;
-
-          return (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "11px 0", borderBottom: i < stages.length - 1 ? "1px solid var(--border)" : "none" }}>
-              <span style={{
-                width: "18px", height: "18px", borderRadius: "50%", flex: "0 0 18px",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                background: isDone ? "var(--ok-soft)" : isFailed ? "var(--danger-soft)" : "transparent",
-                border: `1.5px solid ${isDone ? "var(--ok)" : isFailed ? "var(--danger)" : isActive ? "var(--info)" : "var(--border-strong)"}`,
-              }}>
-                {isActive ? (
-                  <span style={{ width: "9px", height: "9px", border: "1.5px solid var(--info)", borderRightColor: "transparent", borderRadius: "50%", animation: "spin .7s linear infinite" }} />
-                ) : (
-                  <span style={{ color: isDone ? "var(--ok)" : isFailed ? "var(--danger)" : "transparent", fontSize: "10px" }}>
-                    {isDone ? "✓" : isFailed ? "✕" : ""}
-                  </span>
-                )}
-              </span>
-              <span style={{ fontSize: "13px", color: isPending ? "var(--text-faint)" : "var(--text)", fontWeight: isActive ? 600 : 400 }}>
-                {label}
-              </span>
-              {isDone && completed && i === stages.length - 1 && job.completed_at && (
-                <span style={{ marginLeft: "auto", fontSize: "11.5px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--text-faint)" }}>
-                  {new Date(job.completed_at).toLocaleTimeString()}
-                </span>
-              )}
-            </div>
-          );
-        })}
+        {stages.length === 0 && (
+          <div style={{ padding: "14px 0", fontSize: "12.5px", color: "var(--text-faint)" }}>
+            No stage activity recorded yet.
+          </div>
+        )}
+        {stages.map((st, i) => (
+          <StageRow key={st.key} stage={st} isLast={i === stages.length - 1} />
+        ))}
       </Card>
 
-      {/* Error */}
-      {job.error_message && (
+      {/* One-line error summary (full traceback lives on the failed stage above) */}
+      {failed && job.error_message && !failedStage?.traceback && (
         <div style={{ marginBottom: "22px" }}>
           <ErrorMsg message={job.error_message} />
         </div>

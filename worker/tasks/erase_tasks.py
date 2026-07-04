@@ -12,6 +12,7 @@ from celery_app import app
 from db import get_db_session
 from model_loader import get_model
 from scrubber_persistence import apply_scrubber, save_scrubbers
+from stage_log import set_job, stage
 
 logger = logging.getLogger(__name__)
 
@@ -147,66 +148,73 @@ def _mark_failed(job_id: str, error: str) -> None:
 
 @app.task(name="tasks.erase_tasks.run_elm_erase", queue="model_writes")
 def run_elm_erase(job_id: str, triple_ids: list[str]) -> None:
+    set_job(job_id)
     with get_db_session() as db:
         db.execute(
             text("UPDATE edit_job SET status='RUNNING', started_at=:now WHERE id=:id"),
             {"now": datetime.now(timezone.utc), "id": job_id},
         )
         db.commit()
-        triples = _fetch_triples(db, triple_ids)
-
-    if not triples:
-        _mark_failed(job_id, "No triples found for the given IDs")
-        return
 
     try:
-        model, tokenizer = get_model()
-        dataset = _build_erasure_dataset(triples, tokenizer)
+        with stage("load_triples", "Load triples", "📥"):
+            with get_db_session() as db:
+                triples = _fetch_triples(db, triple_ids)
+            if not triples:
+                raise ValueError("No triples found for the given IDs")
 
-        logger.info("Fitting LEACE erasers for job %s (%d triples)", job_id, len(triples))
-        scrubber = _fit_scrubber(model, dataset)
-        if not scrubber.erasers:
-            raise RuntimeError("LEACE produced no erasers — nothing to persist")
-        logger.info("LEACE fit complete for job %s — %d erasers", job_id, len(scrubber.erasers))
+        with stage("build_dataset", "Build erasure dataset", "🧩"):
+            model, tokenizer = get_model()
+            dataset = _build_erasure_dataset(triples, tokenizer)
 
-        # Attach the newly-fit erasers to the running model (prior erasers from earlier
-        # erase jobs are already attached) and record them so every future checkpoint
-        # carries the full, cumulative erasure set.
-        apply_scrubber(model, scrubber)
-        model_loader._active_scrubbers.append(scrubber)
+        with stage("fit_scrubber", "Fit LEACE erasers", "🧽"):
+            logger.info("Fitting LEACE erasers for job %s (%d triples)", job_id, len(triples))
+            scrubber = _fit_scrubber(model, dataset)
+            if not scrubber.erasers:
+                raise RuntimeError("LEACE produced no erasers — nothing to persist")
+            logger.info("LEACE fit complete for job %s — %d erasers", job_id, len(scrubber.erasers))
 
-        checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
-        logger.info("Saving erase checkpoint → %s", checkpoint_path)
-        os.makedirs(checkpoint_path, exist_ok=True)
-        model.save_pretrained(checkpoint_path)
-        tokenizer.save_pretrained(checkpoint_path)
-        save_scrubbers(model_loader._active_scrubbers, checkpoint_path)
+        with stage("apply_scrubber", "Attach scrubber", "🔗"):
+            # Attach the newly-fit erasers to the running model (prior erasers from earlier
+            # erase jobs are already attached) and record them so every future checkpoint
+            # carries the full, cumulative erasure set.
+            apply_scrubber(model, scrubber)
+            model_loader._active_scrubbers.append(scrubber)
 
-        with get_db_session() as db:
-            now = datetime.now(timezone.utc)
-            checkpoint_id = str(uuid.uuid4())
-            db.execute(text("UPDATE model_checkpoint SET is_active=false WHERE is_active=true"))
-            db.execute(
-                text(
-                    "INSERT INTO model_checkpoint (id, path, created_at, job_id, is_active)"
-                    " VALUES (:id, :path, :now, :job_id, true)"
-                ),
-                {"id": checkpoint_id, "path": checkpoint_path, "now": now, "job_id": job_id},
-            )
-            for tid in triple_ids:
+        with stage("save_checkpoint", "Save checkpoint", "💾"):
+            checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
+            logger.info("Saving erase checkpoint → %s", checkpoint_path)
+            os.makedirs(checkpoint_path, exist_ok=True)
+            model.save_pretrained(checkpoint_path)
+            tokenizer.save_pretrained(checkpoint_path)
+            save_scrubbers(model_loader._active_scrubbers, checkpoint_path)
+
+        with stage("finalize", "Commit to database", "✅"):
+            with get_db_session() as db:
+                now = datetime.now(timezone.utc)
+                checkpoint_id = str(uuid.uuid4())
+                db.execute(text("UPDATE model_checkpoint SET is_active=false WHERE is_active=true"))
                 db.execute(
-                    text("UPDATE triple SET pending_erasure=false, committed=false WHERE id=CAST(:id AS uuid)"),
-                    {"id": tid},
+                    text(
+                        "INSERT INTO model_checkpoint (id, path, created_at, job_id, is_active)"
+                        " VALUES (:id, :path, :now, :job_id, true)"
+                    ),
+                    {"id": checkpoint_id, "path": checkpoint_path, "now": now, "job_id": job_id},
                 )
-            db.execute(
-                text("INSERT INTO audit_log (id, job_id, action, created_at) VALUES (:id, :job_id, 'erase_completed', :now)"),
-                {"id": str(uuid.uuid4()), "job_id": job_id, "now": now},
-            )
-            db.execute(
-                text("UPDATE edit_job SET status='COMPLETED', completed_at=:now, checkpoint_path=:cp WHERE id=:id"),
-                {"now": now, "cp": checkpoint_path, "id": job_id},
-            )
-            db.commit()
+                for tid in triple_ids:
+                    db.execute(
+                        text("UPDATE triple SET pending_erasure=false, committed=false WHERE id=CAST(:id AS uuid)"),
+                        {"id": tid},
+                    )
+                db.execute(
+                    text("INSERT INTO audit_log (id, job_id, action, created_at) VALUES (:id, :job_id, 'erase_completed', :now)"),
+                    {"id": str(uuid.uuid4()), "job_id": job_id, "now": now},
+                )
+                db.execute(
+                    text("UPDATE edit_job SET status='COMPLETED', completed_at=:now, checkpoint_path=:cp WHERE id=:id"),
+                    {"now": now, "cp": checkpoint_path, "id": job_id},
+                )
+                db.commit()
 
         logger.info("Erase job %s completed — checkpoint %s", job_id, checkpoint_path)
 

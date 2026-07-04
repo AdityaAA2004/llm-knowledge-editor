@@ -103,6 +103,7 @@ def layer_stats(
     precision=None,
     batch_tokens=None,
     download=True,
+    force_recompute=False,
     progress=tqdm,
 ):
     """
@@ -141,7 +142,12 @@ def layer_stats(
     file_extension = f"{model_name}/{ds_name}_stats/{layer_name}_{precision}_{'-'.join(sorted(to_collect))}{size_suffix}.npz"
     filename = stats_dir / file_extension
 
-    if not filename.exists() and download:
+    # force_recompute (passed by MEMIT's get_cov) makes us ignore any cached stats
+    # file and recompute from the dataset. Upstream ROME's layer_stats accepts this
+    # kwarg; our rewrite had dropped it, which broke MEMIT (ROME never passes it).
+    file_exists = filename.exists() and not force_recompute
+
+    if not file_exists and download:
         remote_url = f"{REMOTE_ROOT_URL}/data/stats/{file_extension}"
         try:
             print(f"Attempting to download {file_extension} from {remote_url}.")
@@ -153,7 +159,7 @@ def layer_stats(
         except Exception as e:
             print(f"Unable to download due to {e}. Computing locally....")
 
-    ds = get_ds() if not filename.exists() else None
+    ds = get_ds() if not file_exists else None
 
     if progress is None:
         progress = lambda x: x
@@ -162,7 +168,7 @@ def layer_stats(
     loader = tally(
         stat,
         ds,
-        cache=filename,
+        cache=(filename if not force_recompute else None),
         sample_size=sample_size,
         batch_size=batch_size,
         collate_fn=length_collation(batch_tokens),

@@ -229,6 +229,7 @@ Takes ~1.5 hrs on RTX 3090. `--batch_tokens 4096` is required — LLaMA 3.2's `m
   /jobs/edit                      POST → { job_id, status: "QUEUED" }
   /jobs/erase                     POST → { job_id, status: "QUEUED" }
   /jobs/{id}                      GET
+  /jobs/{id}/stages               GET   → canonical stages folded from job_stage_log (+ per-stage traceback)
   /jobs/{id}/cancel               POST
 
   /model/status                   GET
@@ -262,6 +263,12 @@ triple(id, subject, relation, object, scope, source_id, source_type,
 edit_job(id UUID, status, job_type, triple_ids UUID[], submitted_at, started_at, completed_at, error_message, checkpoint_path)
 model_checkpoint(id UUID, path, created_at, job_id UUID, is_active bool)
 audit_log(id UUID, job_id UUID, action, triple_snapshot_json, created_at)
+
+-- Process log: append-only stage events per job (event: STARTED|COMPLETED|FAILED|PROGRESS).
+-- Written by the worker via raw SQL (worker/stage_log.py); folded onto the canonical
+-- per-job-type stage list (backend/app/job_stages.py) at GET /jobs/{id}/stages.
+-- id/created_at use server defaults (gen_random_uuid()/now()) so the worker omits them.
+job_stage_log(id UUID, job_id UUID, stage_key, event, message, traceback, created_at)
 ```
 
 `job_type` values: `edit_rome` | `edit_memit` | `erase_elm`

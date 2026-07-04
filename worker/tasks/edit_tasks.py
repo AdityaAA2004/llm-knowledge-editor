@@ -15,6 +15,7 @@ sys.path.insert(0, "/memit")
 from celery_app import app
 from db import get_db_session
 from model_loader import get_model
+from stage_log import set_job, stage
 from triple_to_request import triple_to_rome_request
 
 logger = logging.getLogger(__name__)
@@ -80,35 +81,41 @@ def _mark_failed(job_id: str, error: str) -> None:
 
 @app.task(name="tasks.edit_tasks.run_rome_edit", queue="model_writes")
 def run_rome_edit(job_id: str, triple_ids: list[str]) -> None:
+    set_job(job_id)
     with get_db_session() as db:
         db.execute(
             text("UPDATE edit_job SET status='RUNNING', started_at=:now WHERE id=:id"),
             {"now": datetime.now(timezone.utc), "id": job_id},
         )
         db.commit()
-        triples = _fetch_triples(db, triple_ids)
-
-    if not triples:
-        _mark_failed(job_id, "No triples found for the given IDs")
-        return
 
     try:
         from rome import ROMEHyperParams, apply_rome_to_model
 
-        model, tokenizer = get_model()
-        requests = [triple_to_rome_request(t) for t in triples]
-        hparams = ROMEHyperParams.from_json(HPARAMS_DIR / "ROME" / "Llama-3.2-3B.json")
+        with stage("load_triples", "Load triples", "📥"):
+            with get_db_session() as db:
+                triples = _fetch_triples(db, triple_ids)
+            if not triples:
+                raise ValueError("No triples found for the given IDs")
 
-        logger.info("Applying ROME to job %s (%d triples)", job_id, len(requests))
-        model, _ = apply_rome_to_model(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
+        with stage("build_requests", "Build edit requests", "🧩"):
+            model, tokenizer = get_model()
+            requests = [triple_to_rome_request(t) for t in triples]
+            hparams = ROMEHyperParams.from_json(HPARAMS_DIR / "ROME" / "Llama-3.2-3B.json")
 
-        checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
-        logger.info("Saving checkpoint → %s", checkpoint_path)
-        _save_checkpoint(model, tokenizer, checkpoint_path)
+        with stage("apply_edit", "Compute ROME edit", "🧠"):
+            logger.info("Applying ROME to job %s (%d triples)", job_id, len(requests))
+            model, _ = apply_rome_to_model(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
 
-        with get_db_session() as db:
-            _finalize(db, job_id, triple_ids, checkpoint_path)
-            db.commit()
+        with stage("save_checkpoint", "Save checkpoint", "💾"):
+            checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
+            logger.info("Saving checkpoint → %s", checkpoint_path)
+            _save_checkpoint(model, tokenizer, checkpoint_path)
+
+        with stage("finalize", "Commit to database", "✅"):
+            with get_db_session() as db:
+                _finalize(db, job_id, triple_ids, checkpoint_path)
+                db.commit()
 
         logger.info("ROME job %s completed — checkpoint %s", job_id, checkpoint_path)
 
@@ -120,35 +127,41 @@ def run_rome_edit(job_id: str, triple_ids: list[str]) -> None:
 
 @app.task(name="tasks.edit_tasks.run_memit_batch", queue="model_writes")
 def run_memit_batch(job_id: str, triple_ids: list[str]) -> None:
+    set_job(job_id)
     with get_db_session() as db:
         db.execute(
             text("UPDATE edit_job SET status='RUNNING', started_at=:now WHERE id=:id"),
             {"now": datetime.now(timezone.utc), "id": job_id},
         )
         db.commit()
-        triples = _fetch_triples(db, triple_ids)
-
-    if not triples:
-        _mark_failed(job_id, "No triples found for the given IDs")
-        return
 
     try:
         from memit import MEMITHyperParams, apply_memit_to_model
 
-        model, tokenizer = get_model()
-        requests = [triple_to_rome_request(t) for t in triples]
-        hparams = MEMITHyperParams.from_json(HPARAMS_DIR / "MEMIT" / "Llama-3.2-3B.json")
+        with stage("load_triples", "Load triples", "📥"):
+            with get_db_session() as db:
+                triples = _fetch_triples(db, triple_ids)
+            if not triples:
+                raise ValueError("No triples found for the given IDs")
 
-        logger.info("Applying MEMIT to job %s (%d triples)", job_id, len(requests))
-        model, _ = apply_memit_to_model(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
+        with stage("build_requests", "Build edit requests", "🧩"):
+            model, tokenizer = get_model()
+            requests = [triple_to_rome_request(t) for t in triples]
+            hparams = MEMITHyperParams.from_json(HPARAMS_DIR / "MEMIT" / "Llama-3.2-3B.json")
 
-        checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
-        logger.info("Saving checkpoint → %s", checkpoint_path)
-        _save_checkpoint(model, tokenizer, checkpoint_path)
+        with stage("apply_edit", "Compute MEMIT batch", "🧠"):
+            logger.info("Applying MEMIT to job %s (%d triples)", job_id, len(requests))
+            model, _ = apply_memit_to_model(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
 
-        with get_db_session() as db:
-            _finalize(db, job_id, triple_ids, checkpoint_path)
-            db.commit()
+        with stage("save_checkpoint", "Save checkpoint", "💾"):
+            checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
+            logger.info("Saving checkpoint → %s", checkpoint_path)
+            _save_checkpoint(model, tokenizer, checkpoint_path)
+
+        with stage("finalize", "Commit to database", "✅"):
+            with get_db_session() as db:
+                _finalize(db, job_id, triple_ids, checkpoint_path)
+                db.commit()
 
         logger.info("MEMIT job %s completed — checkpoint %s", job_id, checkpoint_path)
 

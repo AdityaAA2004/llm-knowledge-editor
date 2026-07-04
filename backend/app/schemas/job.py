@@ -47,6 +47,29 @@ class AuditLogRead(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class JobStageEvent(BaseModel):
+    event: str  # STARTED | COMPLETED | FAILED | PROGRESS
+    message: str | None
+    created_at: datetime
+
+
+class JobStage(BaseModel):
+    key: str
+    label: str
+    status: str  # pending | running | done | failed
+    started_at: datetime | None
+    completed_at: datetime | None
+    traceback: str | None
+    events: list[JobStageEvent]
+
+
+class JobStagesResponse(BaseModel):
+    job_id: uuid.UUID
+    job_type: JobType
+    status: JobStatus
+    stages: list[JobStage]
+
+
 class RollbackRequest(BaseModel):
     checkpoint_id: uuid.UUID
 

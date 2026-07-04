@@ -9,6 +9,13 @@ from util import nethook
 
 from .memit_hparams import MEMITHyperParams
 
+# Deep stage-log progress events (guarded — see compute_u.py).
+try:
+    from stage_log import progress as _stage_progress
+except Exception:  # pragma: no cover
+    def _stage_progress(msg):
+        pass
+
 # PATCHED for LLaMA 3.2 3B on modern transformers. Changes vs upstream MEMIT:
 #  - model.config.n_embd -> hidden_size fallback (LLaMA has no n_embd).
 #  - newer transformers' LlamaDecoderLayer.forward returns a bare hidden-states tensor
@@ -179,6 +186,10 @@ def compute_z(
             f"avg prob of [{request['target_new']['str']}] "
             f"{torch.exp(-nll_loss_each).mean().item()}"
         )
+        if it % 5 == 0:
+            _stage_progress(
+                f"Optimize z: layer {layer} step {it}/{hparams.v_num_grad_steps} loss {loss.item():.3f}"
+            )
         if loss < 5e-2:
             break
 

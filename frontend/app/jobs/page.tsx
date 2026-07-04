@@ -20,13 +20,6 @@ const STATUS_VAR: Record<JobStatus, string> = {
   PENDING: "warn", QUEUED: "warn", RUNNING: "info", COMPLETED: "ok", FAILED: "danger",
 };
 
-const STAGES: Record<string, string[]> = {
-  edit_rome: ["Queued", "Load triples", "Compute ROME edit", "Save checkpoint", "Done"],
-  edit_memit: ["Queued", "Load triples", "Compute MEMIT batch", "Save checkpoint", "Done"],
-  erase_elm: ["Queued", "Load concept", "Train ELM adapter", "Save checkpoint", "Done"],
-  rollback: ["Queued", "Locate checkpoint", "Load weights", "Swap active", "Done"],
-};
-
 function fmtDur(ms: number) {
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
@@ -109,9 +102,6 @@ export default function JobsPage() {
         {visible.map((j) => {
           const sv = STATUS_VAR[j.status];
           const running = j.status === "RUNNING";
-          const stages = STAGES[j.job_type] ?? [];
-          const pct = j.status === "COMPLETED" ? 100 : (j.status === "FAILED" ? (70) : 0);
-          const stageIdx = Math.min(stages.length - 1, Math.floor((pct / 100) * stages.length));
 
           let timeLabel = "";
           if (j.status === "COMPLETED" && j.completed_at && j.started_at) {
@@ -162,15 +152,6 @@ export default function JobsPage() {
                     </button>
                   )}
                 </div>
-
-                {running && (
-                  <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "11px" }}>
-                    <div style={{ flex: 1, height: "6px", borderRadius: "4px", background: "var(--border)", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: "45%", background: "var(--info)", borderRadius: "4px", transition: "width .45s ease" }} />
-                    </div>
-                    <span style={{ fontSize: "11px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", color: "var(--info)", minWidth: "90px" }}>{stages[stageIdx] ?? ""}</span>
-                  </div>
-                )}
 
                 {j.error_message && (
                   <div style={{ marginTop: "11px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace", fontSize: "11.5px", color: "var(--danger)", background: "var(--danger-soft)", borderRadius: "7px", padding: "8px 11px" }}>

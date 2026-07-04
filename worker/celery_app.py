@@ -26,7 +26,23 @@ app.conf.update(
 )
 
 
-from celery.signals import worker_process_init  # noqa: E402
+from celery.signals import after_setup_logger, after_setup_task_logger, worker_process_init  # noqa: E402
+
+_LOG_FORMAT = "%(asctime)s %(levelname)s %(name)s | %(message)s"
+
+
+def _apply_format(logger, **kwargs):
+    # Consistent, emoji-friendly formatting so the stage-log lines (▶/✅/❌/…)
+    # read cleanly in `docker compose logs worker`.
+    import logging
+
+    formatter = logging.Formatter(_LOG_FORMAT)
+    for handler in logger.handlers:
+        handler.setFormatter(formatter)
+
+
+after_setup_logger.connect(_apply_format)
+after_setup_task_logger.connect(_apply_format)
 
 
 @worker_process_init.connect

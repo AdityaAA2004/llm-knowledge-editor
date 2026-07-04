@@ -7,10 +7,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_client import dispatch
 from app.db import get_db
+from app.job_stages import stages_for
 from app.models import Triple
-from app.models.job import EditJob, JobStatus, JobType, ModelCheckpoint
+from app.models.job import EditJob, JobStageLog, JobStatus, JobType, ModelCheckpoint
 from app.relations import RETRIEVAL_ONLY_RELATIONS
-from app.schemas.job import EditJobCreate, EditJobRead, EraseJobCreate
+from app.schemas.job import (
+    EditJobCreate,
+    EditJobRead,
+    EraseJobCreate,
+    JobStage,
+    JobStageEvent,
+    JobStagesResponse,
+)
 from app.services.worker_health import check_worker_or_fail_jobs
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
@@ -106,6 +114,71 @@ async def get_job(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(404, "Job not found")
     return job
+
+
+@router.get("/{id}/stages", response_model=JobStagesResponse)
+async def get_job_stages(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Fold the append-only job_stage_log rows onto the canonical stage list."""
+    job = await db.get(EditJob, id)
+    if not job:
+        raise HTTPException(404, "Job not found")
+
+    result = await db.execute(
+        select(JobStageLog)
+        .where(JobStageLog.job_id == id)
+        .order_by(JobStageLog.created_at.asc(), JobStageLog.id.asc())
+    )
+    rows = result.scalars().all()
+
+    # group raw event rows by stage_key, preserving chronological order
+    by_key: dict[str, list[JobStageLog]] = {}
+    for r in rows:
+        by_key.setdefault(r.stage_key, []).append(r)
+
+    stages: list[JobStage] = []
+    for key, label in stages_for(job.job_type):
+        evs = by_key.get(key, [])
+        has_failed = any(e.event == "FAILED" for e in evs)
+        has_completed = any(e.event == "COMPLETED" for e in evs)
+        has_started = any(e.event == "STARTED" for e in evs)
+
+        if has_failed:
+            status = "failed"
+        elif has_completed:
+            status = "done"
+        elif has_started:
+            status = "running"
+        else:
+            status = "pending"
+
+        started_at = next((e.created_at for e in evs if e.event == "STARTED"), None)
+        completed_at = next(
+            (e.created_at for e in reversed(evs) if e.event in ("COMPLETED", "FAILED")),
+            None,
+        )
+        traceback = next((e.traceback for e in evs if e.event == "FAILED"), None)
+
+        stages.append(
+            JobStage(
+                key=key,
+                label=label,
+                status=status,
+                started_at=started_at,
+                completed_at=completed_at,
+                traceback=traceback,
+                events=[
+                    JobStageEvent(event=e.event, message=e.message, created_at=e.created_at)
+                    for e in evs
+                ],
+            )
+        )
+
+    return JobStagesResponse(
+        job_id=job.id,
+        job_type=JobType(job.job_type),
+        status=JobStatus(job.status),
+        stages=stages,
+    )
 
 
 @router.post("/{id}/cancel", response_model=EditJobRead)

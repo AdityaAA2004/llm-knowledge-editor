@@ -78,6 +78,31 @@ export interface EditJob {
   checkpoint_path: string | null;
 }
 
+export type JobStageStatus = "pending" | "running" | "done" | "failed";
+
+export interface JobStageEvent {
+  event: "STARTED" | "COMPLETED" | "FAILED" | "PROGRESS";
+  message: string | null;
+  created_at: string;
+}
+
+export interface JobStage {
+  key: string;
+  label: string;
+  status: JobStageStatus;
+  started_at: string | null;
+  completed_at: string | null;
+  traceback: string | null;
+  events: JobStageEvent[];
+}
+
+export interface JobStagesResponse {
+  job_id: string;
+  job_type: JobType;
+  status: JobStatus;
+  stages: JobStage[];
+}
+
 export interface ModelCheckpoint {
   id: string;
   path: string;

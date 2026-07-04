@@ -10,6 +10,13 @@ from util import nethook
 
 from .rome_hparams import ROMEHyperParams
 
+# Deep stage-log progress events (guarded — see compute_u.py).
+try:
+    from stage_log import progress as _stage_progress
+except Exception:  # pragma: no cover
+    def _stage_progress(msg):
+        pass
+
 
 def compute_v(
     model: AutoModelForCausalLM,
@@ -151,6 +158,10 @@ def compute_v(
             f"avg prob of [{request['target_new']['str']}] "
             f"{torch.exp(-nll_loss_each).mean().item()}"
         )
+        if it % 5 == 0:
+            _stage_progress(
+                f"Optimize v: layer {layer} step {it}/{hparams.v_num_grad_steps} loss {loss.item():.3f}"
+            )
         if loss < 5e-2:
             break
 
