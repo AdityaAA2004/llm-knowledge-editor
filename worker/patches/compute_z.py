@@ -53,9 +53,13 @@ def compute_z(
         "input_ids"
     ][0]
 
-    # Compile list of rewriting and KL x/y pairs
+    # Compile list of rewriting and KL x/y pairs.
+    # The target object may contain literal braces (e.g. JSON request/response bodies).
+    # Escape them so the later `prompt.format(request["subject"])` doesn't parse them as
+    # format fields — the doubled braces collapse back to literals after .format().
+    target_str = tok.decode(target_ids[:-1]).replace("{", "{{").replace("}", "}}")
     rewriting_prompts, kl_prompts = [
-        context.format(request["prompt"]) + tok.decode(target_ids[:-1])
+        context.format(request["prompt"]) + target_str
         for context_types in context_templates
         for context in context_types
     ], ["{} is a"]

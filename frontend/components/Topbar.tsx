@@ -11,6 +11,7 @@ const PAGE_META: Record<string, { title: string }> = {
   "/triples": { title: "Triples" },
   "/jobs": { title: "Jobs" },
   "/model": { title: "Model" },
+  "/chat": { title: "Chat" },
 };
 
 export function Topbar() {

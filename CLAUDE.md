@@ -81,6 +81,7 @@ docker compose build && docker compose up -d
 
 - **KB entities use soft delete** (`deleted_at`). Hard deletes never happen — the triple store and audit log need referential context for rollback.
 - **Triple derivation is automatic on KB writes** — `kb_service.py` generates (subject, relation, object) triples from every save.
+- **Retrieval-only relations** — `request_body` and `response_200` (JSON bodies) are listed in `backend/app/relations.py::RETRIEVAL_ONLY_RELATIONS`. They are **not** pushed to the model (ROME/MEMIT can't reliably encode long, arbitrary sequences, and a body's exact IDs/timestamps are un-memorizable instance data). `POST /jobs/edit` drops them from `triple_ids` before dispatch (400 if a push contains only body triples); `TripleRead.retrieval_only` flags them for the UI. Bodies stay in Postgres (`endpoint_variant` columns + their triples) and are served by retrieval.
 - **Erasure is two-step** — `DELETE /apis/{id}` soft-deletes and marks triples `pending_erasure=true`; the content manager then explicitly posts `POST /jobs/erase` to trigger ELM.
 - **Team transfer rule** — a team cannot be deleted while it owns APIs. All APIs must be reassigned first (ROME updates `owned_by` triple). Only then can the team be soft-deleted and its triples queued for ELM.
 - **Worker is a singleton** — `CELERYD_CONCURRENCY=1` on the `model_writes` queue. One task modifies weights at a time.
@@ -234,6 +235,11 @@ Takes ~1.5 hrs on RTX 3090. `--batch_tokens 4096` is required — LLaMA 3.2's `m
   /model/checkpoints/             GET
   /model/rollback                 POST { checkpoint_id }
   /model/reload                   POST
+
+  /chat/sessions                  GET, POST
+  /chat/sessions/{id}             GET, DELETE
+  /chat/sessions/{id}/messages    POST  → RAG-augments prompt, dispatches generation
+  /chat/stream/{message_id}       GET   → SSE token stream (relayed from Redis Stream)
 ```
 
 ---
@@ -271,6 +277,28 @@ All on queue `model_writes`. Worker file: `worker/tasks/`.
 - `run_memit_batch(job_id, triples)` — batch rank-one update
 - `run_elm_erase(job_id, triple_ids)` — LEACE concept erasure (sidecar scrubber; see "Concept Erasure (ELM)" caveats in Phase 4)
 - `run_rollback(job_id, checkpoint_id)` — load past checkpoint, recompute `committed` states
+- `run_chat_generate(message_id, prompt, gen_params)` — inference (not a write). `model.generate` on the live edited model + attached LEACE scrubbers, streaming tokens to a Redis Stream (`chat:stream:{message_id}`) that the backend relays over SSE. Same singleton worker/queue, so generation serializes with edits (never concurrent).
+
+---
+
+## Chat / RAG inference
+
+The chat lets you query the edited model in natural language. The worker only *completes*
+the `prompt` string it's handed, so **retrieval + prompt augmentation happen entirely in
+the backend** (`backend/app/services/retrieval.py`):
+
+- `POST /chat/sessions/{id}/messages` — lexically retrieves the most relevant KB triples
+  from Postgres (term-overlap ILIKE ranking; `pending_erasure` excluded), renders them as
+  natural-language facts via the same relation templates, and builds a QA-format prompt
+  (`Reference facts:\n- …\n\nQuestion: …\nAnswer:`). RAG is **always on**.
+- This is how **retrieval-only bodies** (`request_body`/`response_200`, never edited into
+  the weights — see Key Domain Rules) get answered: they're injected as context at query
+  time. The exact bodies live in Postgres (source of truth).
+- The user message stores the raw question; the model receives the augmented prompt; the
+  retrieved facts are saved in the assistant message's `gen_params.retrieved` and shown in
+  the UI as collapsible "sources".
+- The model is **base** LLaMA 3.2 3B (not Instruct), so QA answers are rough; the injected
+  facts are what make body/schema questions answerable at all.
 
 ---
 

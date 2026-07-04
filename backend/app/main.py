@@ -9,7 +9,7 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import companies, teams, apis, endpoints, triples, jobs, model
+from app.routers import companies, teams, apis, endpoints, triples, jobs, model, chat
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.include_router(endpoints.router, prefix="/api/v1")
 app.include_router(triples.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
 app.include_router(model.router, prefix="/api/v1")
+app.include_router(chat.router, prefix="/api/v1")
 
 
 @app.get("/health")
