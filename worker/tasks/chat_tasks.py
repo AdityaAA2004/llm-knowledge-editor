@@ -54,9 +54,13 @@ def run_chat_generate(message_id: str, prompt: str, gen_params: dict) -> None:
         model, tokenizer = get_model()
         device = next(model.parameters()).device
 
-        max_new_tokens = int(gen_params.get("max_new_tokens", 64))
-        temperature = float(gen_params.get("temperature", 0.0))
-        top_p = float(gen_params.get("top_p", 1.0))
+        max_new_tokens = int(gen_params.get("max_new_tokens", 256))
+        temperature = float(gen_params.get("temperature", 0.3))
+        top_p = float(gen_params.get("top_p", 0.9))
+        # Anti-degeneration controls apply to both greedy and sampled decoding — they are
+        # what stops base LLaMA's "…does not… does not…" repetition loop on factual QA.
+        repetition_penalty = float(gen_params.get("repetition_penalty", 1.3))
+        no_repeat_ngram_size = int(gen_params.get("no_repeat_ngram_size", 3))
         do_sample = temperature > 0.0
 
         inputs = tokenizer(prompt, return_tensors="pt").to(device)
@@ -67,13 +71,18 @@ def run_chat_generate(message_id: str, prompt: str, gen_params: dict) -> None:
             streamer=streamer,
             max_new_tokens=max_new_tokens,
             do_sample=do_sample,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
             pad_token_id=tokenizer.eos_token_id,
         )
         if do_sample:
             generation_kwargs["temperature"] = temperature
             generation_kwargs["top_p"] = top_p
 
-        logger.info("Chat generate msg %s (max_new_tokens=%d, do_sample=%s)", message_id, max_new_tokens, do_sample)
+        logger.info(
+            "Chat generate msg %s (max_new_tokens=%d, do_sample=%s, rep_pen=%.2f, no_repeat=%d)",
+            message_id, max_new_tokens, do_sample, repetition_penalty, no_repeat_ngram_size,
+        )
 
         thread = threading.Thread(target=_generate_thread, args=(model, generation_kwargs))
         thread.start()

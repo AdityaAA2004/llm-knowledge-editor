@@ -21,13 +21,20 @@ const EXAMPLE_QUESTIONS: string[] = [
 
 type Streaming = { id: string; text: string };
 
+// Fixed decoding config — no user-facing knobs (ChatGPT-style). Low temperature keeps
+// answers grounded; repetition_penalty + no_repeat_ngram_size stop base LLaMA's loop.
+const GEN = {
+  max_new_tokens: 256,
+  temperature: 0.3,
+  top_p: 0.9,
+  repetition_penalty: 1.3,
+  no_repeat_ngram_size: 3,
+};
+
 export default function ChatPage() {
   const qc = useQueryClient();
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [input, setInput] = useState("");
-  const [greedy, setGreedy] = useState(true);
-  const [temperature, setTemperature] = useState(0.7);
-  const [maxTokens, setMaxTokens] = useState(64);
   const [streaming, setStreaming] = useState<Streaming | null>(null);
   const [streamError, setStreamError] = useState<string | null>(null);
 
@@ -58,6 +65,16 @@ export default function ChatPage() {
   useEffect(() => {
     threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
   }, [session?.messages.length, streaming?.text]);
+
+  // Auto-grow the composer textarea as the user types.
+  function autoGrow(el: HTMLTextAreaElement | null) {
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }
+  useEffect(() => {
+    if (!input) autoGrow(inputRef.current);
+  }, [input]);
 
   const newSessionMut = useMutation({
     mutationFn: () => api.post<ChatSession>("/chat/sessions", { title: "New chat" }),
@@ -106,9 +123,7 @@ export default function ChatPage() {
     mutationFn: (vars: { sid: string; prompt: string }) =>
       api.post<ChatSendResponse>(`/chat/sessions/${vars.sid}/messages`, {
         prompt: vars.prompt,
-        max_new_tokens: maxTokens,
-        temperature: greedy ? 0 : temperature,
-        top_p: 1.0,
+        ...GEN,
       }),
     onSuccess: async (res) => {
       setStreamError(null);
@@ -132,12 +147,24 @@ export default function ChatPage() {
     sendMut.mutate({ sid, prompt });
   }
 
+  function stopStream() {
+    esRef.current?.close();
+    if (streaming) {
+      qc.invalidateQueries({ queryKey: ["chat-session", sessionId] });
+    }
+    setStreaming(null);
+  }
+
   function applyExample(question: string) {
     setInput(question);
-    inputRef.current?.focus();
+    requestAnimationFrame(() => {
+      autoGrow(inputRef.current);
+      inputRef.current?.focus();
+    });
   }
 
   const busy = sendMut.isPending || !!streaming;
+  const hasMessages = (session?.messages?.length ?? 0) > 0;
 
   return (
     <div style={{ display: "flex", height: "100%", minHeight: 0 }}>
@@ -195,11 +222,39 @@ export default function ChatPage() {
       <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <div ref={threadRef} style={{ flex: 1, overflow: "auto", padding: "24px 0" }}>
           <div style={{ maxWidth: "720px", margin: "0 auto", padding: "0 24px" }}>
-            {!sessionId && (
-              <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--text-faint)", fontSize: "13px" }}>
-                Ask about the API knowledge base. Relevant facts — including request/response
-                bodies that live only in Postgres — are retrieved and given to the model as
-                context (RAG) before it answers.
+            {!hasMessages && !sessionLoading && (
+              <div style={{
+                minHeight: "60vh", display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center", textAlign: "center", padding: "20px",
+              }}>
+                <div style={{ fontSize: "22px", fontWeight: 700, color: "var(--text)", marginBottom: "10px" }}>
+                  Ask the knowledge base
+                </div>
+                <div style={{ fontSize: "13px", color: "var(--text-faint)", maxWidth: "440px", lineHeight: 1.6, marginBottom: "26px" }}>
+                  Relevant facts — including request/response bodies that live only in
+                  Postgres — are retrieved and given to the model as context (RAG) before it answers.
+                </div>
+                <div style={{
+                  display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px",
+                  width: "100%", maxWidth: "520px",
+                }}>
+                  {EXAMPLE_QUESTIONS.slice(0, 4).map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => applyExample(q)}
+                      style={{
+                        textAlign: "left", background: "var(--surface)", border: "1px solid var(--border)",
+                        borderRadius: "12px", padding: "12px 14px", cursor: "pointer",
+                        fontSize: "12.5px", color: "var(--text-muted)", lineHeight: 1.45,
+                        transition: "border-color 0.12s",
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--accent)")}
+                      onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border)")}
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {sessionLoading && <div style={{ textAlign: "center", padding: "40px" }}><Spinner /></div>}
@@ -209,18 +264,16 @@ export default function ChatPage() {
               const text = isStreamingThis ? streaming!.text : m.content;
               const isUser = m.role === "user";
               return (
-                <div key={m.id} style={{ marginBottom: "18px", display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
-                  <div style={{ fontSize: "10.5px", fontWeight: 600, letterSpacing: "0.4px", textTransform: "uppercase", color: "var(--text-faint)", marginBottom: "5px" }}>
-                    {isUser ? "You" : "Model"}
-                  </div>
+                <div key={m.id} style={{ marginBottom: "22px", display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
                   <div style={{
-                    maxWidth: "88%",
-                    background: isUser ? "var(--accent-soft)" : "var(--surface)",
-                    border: `1px solid ${isUser ? "transparent" : "var(--border)"}`,
-                    borderRadius: "12px", padding: "11px 14px",
-                    fontSize: "13.5px", lineHeight: 1.55, color: "var(--text)",
+                    maxWidth: isUser ? "80%" : "100%",
+                    background: isUser ? "var(--accent-soft)" : "transparent",
+                    border: "none",
+                    borderRadius: isUser ? "16px" : "0",
+                    padding: isUser ? "10px 14px" : "2px 0",
+                    fontSize: "14px", lineHeight: 1.6, color: "var(--text)",
                     whiteSpace: "pre-wrap", wordBreak: "break-word",
-                    fontFamily: isUser ? "inherit" : "var(--font-jetbrains-mono),'JetBrains Mono',monospace",
+                    fontFamily: "inherit",
                   }}>
                     {text}
                     {isStreamingThis && (
@@ -263,76 +316,54 @@ export default function ChatPage() {
           <div style={{ maxWidth: "720px", margin: "0 auto", padding: "0 24px" }}>
             {streamError && <div style={{ marginBottom: "10px" }}><ErrorMsg message={streamError} /></div>}
 
-            {/* Example question chips */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "10px" }}>
-              {EXAMPLE_QUESTIONS.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => applyExample(q)}
-                  title={q}
-                  style={{
-                    background: "var(--surface-2)", border: "1px solid var(--border)",
-                    borderRadius: "20px", padding: "4px 11px", cursor: "pointer",
-                    fontSize: "11.5px", color: "var(--text-muted)",
-                  }}
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-
-            {/* Input row */}
-            <div style={{ display: "flex", gap: "9px", alignItems: "flex-end" }}>
+            {/* Input pill with embedded send / stop button */}
+            <div style={{
+              display: "flex", alignItems: "flex-end", gap: "8px",
+              background: "var(--surface-2)", border: "1px solid var(--border)",
+              borderRadius: "24px", padding: "8px 8px 8px 16px",
+            }}>
               <textarea
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { setInput(e.target.value); autoGrow(e.target); }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); }
                 }}
-                placeholder="Who is the tech lead of the Payments team?"
-                rows={2}
+                placeholder="Ask about the API knowledge base…"
+                rows={1}
                 style={{
-                  flex: 1, resize: "none", background: "var(--surface-2)", border: "1px solid var(--border)",
-                  borderRadius: "10px", padding: "10px 12px", fontSize: "13.5px", lineHeight: 1.5,
+                  flex: 1, resize: "none", background: "transparent", border: "none",
+                  padding: "6px 0", fontSize: "14px", lineHeight: 1.5, maxHeight: "200px",
                   color: "var(--text)", outline: "none", fontFamily: "inherit",
                 }}
               />
               <button
-                onClick={handleSend}
-                disabled={busy || !input.trim()}
+                onClick={streaming ? stopStream : handleSend}
+                disabled={!streaming && (busy || !input.trim())}
+                title={streaming ? "Stop generating" : "Send"}
                 style={{
-                  flex: "0 0 auto", background: "var(--accent)", color: "var(--accent-fg)", border: "none",
-                  borderRadius: "10px", padding: "10px 18px", cursor: busy || !input.trim() ? "default" : "pointer",
-                  opacity: busy || !input.trim() ? 0.5 : 1, font: "600 13px 'IBM Plex Sans'", height: "42px",
+                  flex: "0 0 auto", display: "flex", alignItems: "center", justifyContent: "center",
+                  width: "34px", height: "34px", borderRadius: "50%", border: "none",
+                  background: streaming ? "var(--surface)" : "var(--accent)",
+                  color: streaming ? "var(--text)" : "var(--accent-fg)",
+                  cursor: streaming ? "pointer" : busy || !input.trim() ? "default" : "pointer",
+                  opacity: !streaming && (busy || !input.trim()) ? 0.4 : 1,
                 }}
               >
-                {busy ? <Spinner size={13} /> : "Send"}
+                {streaming ? (
+                  <span style={{ width: "11px", height: "11px", background: "currentColor", borderRadius: "2px" }} />
+                ) : sendMut.isPending ? (
+                  <Spinner size={13} />
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5" />
+                    <polyline points="5 12 12 5 19 12" />
+                  </svg>
+                )}
               </button>
             </div>
-
-            {/* Generation controls */}
-            <div style={{ display: "flex", alignItems: "center", gap: "16px", marginTop: "10px", fontSize: "11.5px", color: "var(--text-muted)" }}>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", cursor: "pointer" }}>
-                <input type="checkbox" checked={greedy} onChange={(e) => setGreedy(e.target.checked)} />
-                Greedy (deterministic)
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px", opacity: greedy ? 0.4 : 1 }}>
-                temp
-                <input
-                  type="number" min={0.1} max={2} step={0.1} value={temperature} disabled={greedy}
-                  onChange={(e) => setTemperature(parseFloat(e.target.value) || 0.1)}
-                  style={{ width: "56px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "6px", padding: "3px 6px", color: "var(--text)", fontSize: "11.5px" }}
-                />
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                max tokens
-                <input
-                  type="number" min={1} max={1024} step={1} value={maxTokens}
-                  onChange={(e) => setMaxTokens(Math.max(1, Math.min(1024, parseInt(e.target.value) || 64)))}
-                  style={{ width: "62px", background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: "6px", padding: "3px 6px", color: "var(--text)", fontSize: "11.5px" }}
-                />
-              </label>
+            <div style={{ textAlign: "center", fontSize: "10.5px", color: "var(--text-faint)", marginTop: "7px" }}>
+              Base LLaMA 3.2 3B with RAG over the KB — answers may be rough. Enter to send, Shift+Enter for newline.
             </div>
           </div>
         </div>

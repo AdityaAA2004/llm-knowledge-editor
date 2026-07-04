@@ -99,6 +99,8 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
         "max_new_tokens": body.max_new_tokens,
         "temperature": body.temperature,
         "top_p": body.top_p,
+        "repetition_penalty": body.repetition_penalty,
+        "no_repeat_ngram_size": body.no_repeat_ngram_size,
         # Rendered facts injected into the prompt, kept for UI transparency ("sources").
         "retrieved": [c["text"] for c in context],
     }

@@ -59,6 +59,10 @@ export interface Triple {
   source_type: string;
   committed: boolean;
   pending_erasure: boolean;
+  // True for request_body/response_200 bodies: served from Postgres via retrieval,
+  // never pushed to the model. These stay committed=false forever, so they must not
+  // be treated as ordinary "pending" (they can't be pushed).
+  retrieval_only: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -131,6 +135,8 @@ export interface ChatGenParams {
   max_new_tokens?: number;
   temperature?: number;
   top_p?: number;
+  repetition_penalty?: number;
+  no_repeat_ngram_size?: number;
   // RAG facts injected into the prompt for this turn (assistant rows).
   retrieved?: string[];
 }

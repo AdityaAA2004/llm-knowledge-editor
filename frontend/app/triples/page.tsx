@@ -9,13 +9,15 @@ import { Spinner, ErrorMsg, TabBar, Toast } from "@/components/ui";
 
 type TFilter = "all" | "committed" | "pending" | "erasure";
 
-function toneOf(t: Triple): "ok" | "warn" | "danger" {
+function toneOf(t: Triple): "ok" | "warn" | "danger" | "muted" {
   if (t.pending_erasure) return "danger";
+  if (t.retrieval_only) return "muted";
   if (!t.committed) return "warn";
   return "ok";
 }
 function labelOf(t: Triple) {
   if (t.pending_erasure) return "Pending Erasure";
+  if (t.retrieval_only) return "Retrieval-only";
   if (!t.committed) return "Pending";
   return "Committed";
 }
@@ -60,23 +62,26 @@ export default function TriplesPage() {
   });
 
   const all = triples ?? [];
+  // Retrieval-only bodies are never committed and can't be pushed — treat them as a
+  // distinct category rather than lumping them into "pending".
+  const isPushable = (t: Triple) => !t.committed && !t.pending_erasure && !t.retrieval_only;
   const counts = {
     all: all.length,
     committed: all.filter((t) => t.committed && !t.pending_erasure).length,
-    pending: all.filter((t) => !t.committed && !t.pending_erasure).length,
+    pending: all.filter(isPushable).length,
     erasure: all.filter((t) => t.pending_erasure).length,
   };
 
   function matches(t: Triple): boolean {
     if (filter === "all") return true;
     if (filter === "committed") return t.committed && !t.pending_erasure;
-    if (filter === "pending") return !t.committed && !t.pending_erasure;
+    if (filter === "pending") return isPushable(t);
     if (filter === "erasure") return !!t.pending_erasure;
     return false;
   }
 
   const visible = all.filter(matches);
-  const selectable = visible.filter((t) => !t.committed && !t.pending_erasure);
+  const selectable = visible.filter(isPushable);
   const allChecked = selectable.length > 0 && selectable.every((t) => sel.has(t.id));
   const selectedCount = sel.size;
   const canPush = selectedCount > 0;
@@ -173,13 +178,14 @@ export default function TriplesPage() {
           )}
 
           {visible.map((t) => {
-            const isSelectable = !t.committed && !t.pending_erasure;
+            const isSelectable = isPushable(t);
             const checked = sel.has(t.id);
             const tone = toneOf(t);
             return (
               <div
                 key={t.id}
                 onClick={() => toggleOne(t.id, isSelectable)}
+                title={t.retrieval_only ? "Request/response body — served from Postgres via retrieval, never pushed to the model" : undefined}
                 style={{
                   display: "grid", gridTemplateColumns: "38px 1.3fr 0.9fr 1.3fr 0.7fr 130px",
                   gap: "12px", padding: "12px 16px", borderBottom: "1px solid var(--border)",

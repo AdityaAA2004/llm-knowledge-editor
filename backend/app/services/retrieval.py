@@ -88,12 +88,41 @@ async def retrieve_context(db: AsyncSession, query: str, limit: int = 6) -> list
     ]
 
 
+# Base (non-instruct) LLaMA 3.2 3B needs behaviour demonstrated, not just instructed. This
+# one-shot exemplar shows the target behaviour we most often get wrong: reading a nested
+# JSON response body to answer a yes/no field question directly and concisely. It uses a
+# fictional /v1/orders endpoint so it can never be mistaken for a real retrieved fact.
+_FEWSHOT = (
+    "Reference facts:\n"
+    "- The 200 response of GET /v1/orders is "
+    '{"orders": [{"orderId": 1, "status": "shipped", "carrier": {"name": "fedex"}}]}\n'
+    "Question: When we list orders, do we get the carrier for each order?\n"
+    "Answer: Yes. Each order in the 200 response of GET /v1/orders includes a nested "
+    '"carrier" object with its "name" (e.g. "fedex").'
+)
+
+_INSTRUCTION = (
+    "You are an assistant for a company's API knowledge base. Answer the question using "
+    "ONLY the reference facts. Inspect any JSON bodies field by field before answering. "
+    "Answer directly in one or two sentences and do not repeat yourself. If the facts do "
+    "not contain the answer, say so."
+)
+
+
 def build_rag_prompt(question: str, context: list[dict]) -> str:
-    """Assemble a QA-style prompt with retrieved reference facts for the (base) model."""
-    header = "You are an assistant for a company's API knowledge base."
+    """Assemble a QA-style prompt with retrieved reference facts for the (base) model.
+
+    A one-shot exemplar is prepended to demonstrate reading JSON bodies and answering
+    concisely — base LLaMA follows a shown pattern far better than a bare instruction.
+    """
     if context:
         facts = "\n".join(f"- {c['text']}" for c in context)
-        preamble = f"{header} Use the reference facts to answer the question.\n\nReference facts:\n{facts}\n\n"
+        block = f"Reference facts:\n{facts}\n\n"
     else:
-        preamble = f"{header}\n\n"
-    return f"{preamble}Question: {question}\nAnswer:"
+        block = "Reference facts:\n- (none found)\n\n"
+    return (
+        f"{_INSTRUCTION}\n\n"
+        f"{_FEWSHOT}\n\n"
+        f"{block}"
+        f"Question: {question}\nAnswer:"
+    )
