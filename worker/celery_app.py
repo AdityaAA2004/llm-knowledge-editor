@@ -15,6 +15,7 @@ app = Celery(
         "tasks.erase_tasks",
         "tasks.rollback_tasks",
         "tasks.chat_tasks",
+        "tasks.incident_tasks",
     ],
 )
 

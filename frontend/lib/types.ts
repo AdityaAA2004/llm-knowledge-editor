@@ -121,6 +121,44 @@ export interface ModelStatus {
   total_checkpoints: number;
 }
 
+export type IncidentSeverity = "low" | "medium" | "high" | "critical";
+
+export interface IncidentBriefRequest {
+  title: string;
+  severity: IncidentSeverity;
+  signal_source: string | null;
+  service_hint: string | null;
+  api_hint: string | null;
+  http_method: string | null;
+  path: string | null;
+  symptom: string;
+}
+
+export interface IncidentDeterministicSummary {
+  owner_team: string | null;
+  tech_lead: string | null;
+  point_of_contact: string | null;
+  api_name: string | null;
+  endpoint: string | null;
+  business_function: string | null;
+}
+
+export interface IncidentContext {
+  matched_subjects: string[];
+  ownership_facts: string[];
+  endpoint_facts: string[];
+  behavior_facts: string[];
+  body_facts: string[];
+  deterministic_summary: IncidentDeterministicSummary;
+}
+
+export interface IncidentBriefQueuedResponse {
+  request_id: string;
+  status: "QUEUED";
+  stream_url: string;
+  context: IncidentContext;
+}
+
 export type ChatRole = "user" | "assistant";
 export type ChatMessageStatus = "complete" | "streaming" | "error";
 
