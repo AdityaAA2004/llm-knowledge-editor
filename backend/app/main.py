@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 from contextlib import asynccontextmanager
@@ -13,11 +14,17 @@ from app.routers import (
     companies, teams, apis, endpoints, triples, jobs, model, chat, incidents,
     incident_log, incident_webhook,
 )
+from app.services.betterstack_poller import poll_loop
+
+_POLL_INTERVAL_S = int(os.environ.get("BETTERSTACK_POLL_INTERVAL_S", "30"))
+_POLL_LOOKBACK_S = int(os.environ.get("BETTERSTACK_POLL_LOOKBACK_S", "900"))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    poller_task = asyncio.create_task(poll_loop(_POLL_INTERVAL_S, _POLL_LOOKBACK_S))
     yield
+    poller_task.cancel()
 
 
 app = FastAPI(title="SLM Knowledge Platform", lifespan=lifespan)
