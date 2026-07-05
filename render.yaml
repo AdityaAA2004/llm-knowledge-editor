@@ -1,0 +1,39 @@
+services:
+  - type: web
+    name: slm-backend
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: DATABASE_SYNC_URL
+        sync: false
+      - key: CELERY_BROKER_URL
+        sync: false
+      - key: CELERY_RESULT_BACKEND
+        sync: false
+      - key: BACKEND_CORS_ORIGINS
+        sync: false
+      # Populated once the incident workflow (Phase 1) is built:
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: BETTERSTACK_WEBHOOK_TOKEN
+        sync: false
+
+  - type: web
+    name: slm-mockprod
+    runtime: docker
+    dockerfilePath: ./mockprod/Dockerfile
+    dockerContext: ./mockprod
+    plan: free
+    envVars:
+      - key: DATABASE_SYNC_URL
+        sync: false
+      - key: BETTERSTACK_SOURCE_TOKEN
+        sync: false
+      - key: BETTERSTACK_INGEST_HOST
+        sync: false
+      - key: MOCKPROD_ERROR_RATE
+        value: "0.15"
