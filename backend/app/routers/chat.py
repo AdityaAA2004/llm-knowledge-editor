@@ -2,7 +2,7 @@ import asyncio
 import json
 import os
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
@@ -89,11 +89,23 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
 
     now = datetime.now(timezone.utc)
 
+    # Prior turns for this session — run before the current turn is added below,
+    # so it's never duplicated into its own history.
+    history_rows = (
+        await db.execute(
+            select(ChatMessage)
+            .where(ChatMessage.session_id == session_id, ChatMessage.status == "complete")
+            .order_by(ChatMessage.created_at.desc())
+            .limit(6)
+        )
+    ).scalars().all()
+    history = [{"role": m.role, "content": m.content} for m in reversed(history_rows)]
+
     # RAG: retrieve relevant KB facts from Postgres (incl. retrieval-only bodies that are
     # not in the model's weights) and inject them into the prompt. The worker completes
     # whatever prompt it's handed, so retrieval lives entirely here.
     context = await retrieve_context(db, body.prompt)
-    model_prompt = build_rag_prompt(body.prompt, context)
+    model_prompt = build_rag_prompt(body.prompt, context, history=history)
 
     gen_params = {
         "max_new_tokens": body.max_new_tokens,
@@ -120,7 +132,10 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
         gen_params=gen_params,
         checkpoint_id=active_cp.id if active_cp else None,
         status="streaming",
-        created_at=now,
+        # Strictly after user_msg's timestamp so created_at ordering (used both here
+        # for history and in get_session for the UI) reliably reflects turn order,
+        # even though both messages are created within the same request.
+        created_at=now + timedelta(microseconds=1),
     )
     db.add(assistant_msg)
 

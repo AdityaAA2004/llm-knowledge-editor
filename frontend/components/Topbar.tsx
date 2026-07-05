@@ -8,6 +8,7 @@ import type { ModelStatus } from "@/lib/types";
 
 const PAGE_META: Record<string, { title: string }> = {
   "/incidents": { title: "Triage" },
+  "/incident-log": { title: "Incidents" },
   "/knowledge-base": { title: "Knowledge Base" },
   "/triples": { title: "Triples" },
   "/jobs": { title: "Jobs" },

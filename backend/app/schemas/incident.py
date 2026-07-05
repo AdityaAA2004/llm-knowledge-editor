@@ -64,6 +64,7 @@ class IncidentContextRead(BaseModel):
     endpoint_facts: list[str]
     behavior_facts: list[str]
     body_facts: list[str]
+    incident_facts: list[str]
     deterministic_summary: DeterministicSummaryRead
     routing_recommendation: RoutingRecommendationRead
     knowledge_status: KnowledgeStatusRead

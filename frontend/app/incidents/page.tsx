@@ -400,6 +400,8 @@ export default function IncidentsPage() {
 
           <FactList title="Structured bodies (retrieval-only exact facts)" facts={context?.body_facts ?? []} tone="muted" />
 
+          <FactList title="Incident evidence (from auto-detected incidents)" facts={context?.incident_facts ?? []} tone="warn" />
+
           <div>
             <SectionLabel>Model-written triage pack</SectionLabel>
             <Card style={{ border: "1px solid var(--accent-soft)" }}>

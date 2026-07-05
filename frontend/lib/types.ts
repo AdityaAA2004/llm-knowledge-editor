@@ -182,6 +182,7 @@ export interface IncidentContext {
   endpoint_facts: string[];
   behavior_facts: string[];
   body_facts: string[];
+  incident_facts: string[];
   deterministic_summary: IncidentDeterministicSummary;
   routing_recommendation: IncidentRoutingRecommendation;
   knowledge_status: IncidentKnowledgeStatus;
@@ -192,6 +193,23 @@ export interface IncidentBriefQueuedResponse {
   status: "QUEUED";
   stream_url: string;
   context: IncidentContext;
+}
+
+export interface IncidentRecord {
+  id: string;
+  number: string;
+  title: string;
+  severity: string;
+  status: string;
+  matched_api_id: string | null;
+  matched_endpoint_id: string | null;
+  route_to_team: string | null;
+  assigned_member: string | null;
+  status_code: number | null;
+  stack_trace: string | null;
+  edit_job_id: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export type ChatRole = "user" | "assistant";

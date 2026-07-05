@@ -68,7 +68,8 @@ export function Sidebar() {
   const activeCp = status?.active_checkpoint;
   const cpShort = activeCp ? activeCp.path.split("-").slice(-1)[0].replace(".bin", "") : "—";
 
-  const isIncidents = pathname.startsWith("/incidents");
+  const isTriage = pathname.startsWith("/incidents");
+  const isIncidentLog = pathname.startsWith("/incident-log");
   const isKb = pathname.startsWith("/knowledge-base");
   const isTriples = pathname === "/triples";
   const isJobs = pathname.startsWith("/jobs");
@@ -100,7 +101,15 @@ export function Sidebar() {
       <nav style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "2px", flex: 1 }}>
         <NavSection label="Operations" />
 
-        <NavItem href="/incidents" active={isIncidents}>
+        <NavItem href="/incident-log" active={isIncidentLog}>
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="2.8" y="3" width="12.4" height="12" rx="1.6" />
+            <path d="M6 7.5H12 M6 10.5H10" />
+          </svg>
+          Incidents
+        </NavItem>
+
+        <NavItem href="/incidents" active={isTriage}>
           <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
             <path d="M9 2.2 15.2 14H2.8L9 2.2Z" />
             <path d="M9 6.3V10" />

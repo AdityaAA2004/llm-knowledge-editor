@@ -32,6 +32,12 @@ _RELATION_TEMPLATES = {
     "business_function": "The business function of {} is",
     "request_body": "The request body of {} is",
     "response_200": "The 200 response of {} is",
+    "incident_number": "The incident number for {} is",
+    "incident_team": "The team assigned to {} is",
+    "assigned_member": "The team member assigned to {} is",
+    "incident_request": "The request that triggered {} was",
+    "incident_response": "The response returned by {} was",
+    "incident_stack_trace": "The stack trace for {} was",
 }
 
 _STOPWORDS = {
@@ -53,6 +59,12 @@ _INCIDENT_RELATION_PRIORITY = {
     "belongs_to_company": 30,
     "request_body": 15,
     "response_200": 15,
+    "incident_number": 65,
+    "incident_team": 65,
+    "assigned_member": 65,
+    "incident_request": 20,
+    "incident_response": 20,
+    "incident_stack_trace": 20,
 }
 
 _CHAT_RELATION_PRIORITY = {
@@ -65,6 +77,12 @@ _CHAT_RELATION_PRIORITY = {
     "point_of_contact": 20,
     "description": 18,
     "belongs_to_company": 14,
+    "incident_number": 26,
+    "incident_team": 26,
+    "assigned_member": 26,
+    "incident_request": 30,
+    "incident_response": 30,
+    "incident_stack_trace": 32,
 }
 
 _RELATION_BUCKET = {
@@ -77,12 +95,18 @@ _RELATION_BUCKET = {
     "description": "behavior",
     "request_body": "bodies",
     "response_200": "bodies",
+    "incident_number": "incident",
+    "incident_team": "incident",
+    "assigned_member": "incident",
+    "incident_request": "incident",
+    "incident_response": "incident",
+    "incident_stack_trace": "incident",
 }
 
-_BUCKET_LIMITS = {"ownership": 4, "endpoint": 4, "behavior": 4, "bodies": 2}
+_BUCKET_LIMITS = {"ownership": 4, "endpoint": 4, "behavior": 4, "bodies": 2, "incident": 4}
 _SEVERITIES = {"low", "medium", "high", "critical"}
 
-IncidentBucket = Literal["ownership", "endpoint", "behavior", "bodies"]
+IncidentBucket = Literal["ownership", "endpoint", "behavior", "bodies", "incident"]
 
 
 @dataclass(slots=True)
@@ -453,6 +477,7 @@ async def retrieve_incident_context(db: AsyncSession, query: IncidentQuery) -> d
         "endpoint_facts": grouped["endpoint"],
         "behavior_facts": grouped["behavior"],
         "body_facts": grouped["bodies"],
+        "incident_facts": grouped["incident"],
         "deterministic_summary": summary,
         "routing_recommendation": _routing_recommendation(summary, likely_matches),
         "knowledge_status": _knowledge_status(facts),
@@ -488,7 +513,33 @@ _INCIDENT_INSTRUCTION = (
 )
 
 
-def build_rag_prompt(question: str, context: list[dict]) -> str:
+_MAX_HISTORY_CHARS = 1500
+
+
+def _render_history(history: list[dict] | None) -> str:
+    """Renders prior turns oldest-first, trimmed to a char budget (dropping the
+    oldest turns first) — the model is a 3B base model with limited effective
+    context, so unbounded history would crowd out the RAG facts block."""
+    if not history:
+        return ""
+
+    lines: list[str] = []
+    total_chars = 0
+    for turn in reversed(history):
+        role = "User" if turn.get("role") == "user" else "Assistant"
+        line = f"{role}: {turn.get('content', '')}"
+        if total_chars + len(line) > _MAX_HISTORY_CHARS:
+            break
+        lines.append(line)
+        total_chars += len(line)
+
+    if not lines:
+        return ""
+    lines.reverse()
+    return "Conversation so far:\n" + "\n".join(lines) + "\n\n"
+
+
+def build_rag_prompt(question: str, context: list[dict], history: list[dict] | None = None) -> str:
     if context:
         facts = "\n".join(f"- {c['text']}" for c in context)
         block = f"Reference facts:\n{facts}\n\n"
@@ -497,6 +548,7 @@ def build_rag_prompt(question: str, context: list[dict]) -> str:
     return (
         f"{_CHAT_INSTRUCTION}\n\n"
         f"{_CHAT_FEWSHOT}\n\n"
+        f"{_render_history(history)}"
         f"{block}"
         f"Question: {question}\nAnswer:"
     )
@@ -513,6 +565,7 @@ def build_incident_prompt(query: IncidentQuery, context: dict) -> str:
         ("Endpoint facts", "endpoint_facts"),
         ("Behavior facts", "behavior_facts"),
         ("Structured body facts", "body_facts"),
+        ("Incident facts", "incident_facts"),
     ]:
         facts = context.get(key) or []
         if facts:

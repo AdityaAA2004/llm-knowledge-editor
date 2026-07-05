@@ -9,7 +9,10 @@ load_dotenv()
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import companies, teams, apis, endpoints, triples, jobs, model, chat, incidents
+from app.routers import (
+    companies, teams, apis, endpoints, triples, jobs, model, chat, incidents,
+    incident_log, incident_webhook,
+)
 
 
 @asynccontextmanager
@@ -37,6 +40,8 @@ app.include_router(jobs.router, prefix="/api/v1")
 app.include_router(model.router, prefix="/api/v1")
 app.include_router(chat.router, prefix="/api/v1")
 app.include_router(incidents.router, prefix="/api/v1")
+app.include_router(incident_log.router, prefix="/api/v1")
+app.include_router(incident_webhook.router, prefix="/api/v1")
 
 
 @app.get("/health")

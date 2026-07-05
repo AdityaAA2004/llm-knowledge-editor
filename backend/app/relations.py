@@ -9,4 +9,10 @@ They remain in Postgres (the `endpoint_variant` columns and their derived triple
 are served by retrieval instead. Edit jobs drop these triples before dispatch.
 """
 
-RETRIEVAL_ONLY_RELATIONS = {"request_body", "response_200"}
+RETRIEVAL_ONLY_RELATIONS = {
+    "request_body",
+    "response_200",
+    "incident_request",
+    "incident_response",
+    "incident_stack_trace",
+}

@@ -8,6 +8,9 @@ RELATION_TEMPLATES = {
     "business_function":  "The business function of {} is",
     "request_body":       "The request body of {} is",
     "response_200":       "The 200 response of {} is",
+    "incident_number":    "The incident number for {} is",
+    "incident_team":      "The team assigned to {} is",
+    "assigned_member":    "The team member assigned to {} is",
 }
 
 
