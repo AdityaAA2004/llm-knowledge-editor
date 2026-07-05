@@ -106,7 +106,7 @@ export function Sidebar() {
             <path d="M9 6.3V10" />
             <path d="M9 12.6v.1" />
           </svg>
-          Incidents
+          Triage
         </NavItem>
 
         <NavSection label="Authoring" />

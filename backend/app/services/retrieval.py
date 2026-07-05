@@ -105,6 +105,7 @@ class ScoredFact:
     relation: str
     bucket: IncidentBucket
     endpoint_match: bool
+    reasons: list[str]
 
 
 def _normalize(value: str | None) -> str:
@@ -196,6 +197,7 @@ def _score_for_chat(triple: Triple, query: str) -> ScoredFact | None:
         relation=triple.relation,
         bucket=_bucket_for(triple.relation),
         endpoint_match=endpoint_match,
+        reasons=[],
     )
 
 
@@ -207,16 +209,36 @@ def _score_for_incident(triple: Triple, query: IncidentQuery) -> ScoredFact | No
         return None
 
     score = _INCIDENT_RELATION_PRIORITY.get(triple.relation, 10)
+    reasons: list[str] = []
     endpoint_score, endpoint_match = _path_match_score(subject, query.http_method, query.path)
     score += endpoint_score
-    score += _subject_identifier_score(subject, query.service_hint, 110, object_)
-    score += _subject_identifier_score(subject, query.api_hint, 95, object_)
+    if endpoint_match:
+        reasons.append("Exact endpoint cue match")
+
+    service_score = _subject_identifier_score(subject, query.service_hint, 110, object_)
+    api_score = _subject_identifier_score(subject, query.api_hint, 95, object_)
+    score += service_score + api_score
+    if service_score:
+        reasons.append("Matches service hint")
+    if api_score:
+        reasons.append("Matches API hint")
 
     subject_matches, object_matches = _term_overlap_score(subject, object_, symptom_terms)
     score += subject_matches * 12 + object_matches * 4
+    if subject_matches:
+        reasons.append("Symptom terms match subject")
+    elif object_matches:
+        reasons.append("Symptom terms match evidence")
 
     if triple.relation in {"request_body", "response_200"} and not endpoint_match:
         score -= 40
+    elif triple.relation in {"request_body", "response_200"} and endpoint_match:
+        reasons.append("Structured body available for matched endpoint")
+
+    if triple.relation in {"owned_by_team", "tech_lead", "point_of_contact"}:
+        reasons.append("Routing evidence present")
+    elif triple.relation in {"belongs_to_api", "business_function", "description"}:
+        reasons.append("Service behavior evidence present")
 
     if score <= 0 or (subject_matches == 0 and object_matches == 0 and endpoint_score == 0 and not any([
         _normalize(query.service_hint) in subject if query.service_hint else False,
@@ -231,6 +253,7 @@ def _score_for_incident(triple: Triple, query: IncidentQuery) -> ScoredFact | No
         relation=triple.relation,
         bucket=_bucket_for(triple.relation),
         endpoint_match=endpoint_match,
+        reasons=reasons,
     )
 
 
@@ -262,6 +285,14 @@ def _group_incident_facts(facts: list[ScoredFact]) -> dict[str, list[str]]:
     return grouped
 
 
+def _confidence_for_score(score: int, reason_count: int) -> Literal["high", "medium", "low"]:
+    if score >= 260 or (score >= 200 and reason_count >= 3):
+        return "high"
+    if score >= 140 or reason_count >= 2:
+        return "medium"
+    return "low"
+
+
 def _deterministic_summary(facts: list[ScoredFact]) -> dict[str, str | None]:
     summary = {
         "owner_team": None,
@@ -289,6 +320,92 @@ def _deterministic_summary(facts: list[ScoredFact]) -> dict[str, str | None]:
             summary["business_function"] = triple.object
 
     return summary
+
+
+def _build_likely_matches(facts: list[ScoredFact]) -> list[dict]:
+    grouped: dict[str, dict] = {}
+    for fact in facts:
+        subject = fact.triple.subject
+        entry = grouped.get(subject)
+        retrieval_only = 1 if fact.relation in {"request_body", "response_200"} else 0
+        pending = 1 if (not fact.triple.committed and not retrieval_only) else 0
+        committed = 1 if fact.triple.committed else 0
+        if entry is None:
+            grouped[subject] = {
+                "subject": subject,
+                "source_type": fact.triple.source_type,
+                "top_relation": fact.relation,
+                "fact_preview": fact.text,
+                "score": fact.score,
+                "reasons": list(dict.fromkeys(fact.reasons)),
+                "committed_facts": committed,
+                "pending_facts": pending,
+                "retrieval_only_facts": retrieval_only,
+            }
+            continue
+
+        entry["committed_facts"] += committed
+        entry["pending_facts"] += pending
+        entry["retrieval_only_facts"] += retrieval_only
+        entry["reasons"] = list(dict.fromkeys([*entry["reasons"], *fact.reasons]))
+        if fact.score > entry["score"]:
+            entry["score"] = fact.score
+            entry["top_relation"] = fact.relation
+            entry["fact_preview"] = fact.text
+            entry["source_type"] = fact.triple.source_type
+
+    likely_matches = sorted(grouped.values(), key=lambda item: item["score"], reverse=True)[:5]
+    for item in likely_matches:
+        item["confidence"] = _confidence_for_score(item["score"], len(item["reasons"]))
+    return likely_matches
+
+
+def _knowledge_status(facts: list[ScoredFact]) -> dict:
+    freshest = max((fact.triple.updated_at for fact in facts if fact.triple.updated_at is not None), default=None)
+    matched_fact_count = len(facts)
+    committed_fact_count = sum(1 for fact in facts if fact.triple.committed)
+    retrieval_only_fact_count = sum(1 for fact in facts if fact.relation in {"request_body", "response_200"})
+    pending_fact_count = sum(
+        1 for fact in facts if not fact.triple.committed and fact.relation not in {"request_body", "response_200"}
+    )
+    return {
+        "matched_fact_count": matched_fact_count,
+        "committed_fact_count": committed_fact_count,
+        "pending_fact_count": pending_fact_count,
+        "retrieval_only_fact_count": retrieval_only_fact_count,
+        "freshest_fact_at": freshest,
+    }
+
+
+def _routing_recommendation(summary: dict[str, str | None], likely_matches: list[dict]) -> dict:
+    primary_subject = likely_matches[0]["subject"] if likely_matches else None
+    confidence: Literal["high", "medium", "low"] = likely_matches[0]["confidence"] if likely_matches else "low"
+    route_to_team = summary.get("owner_team")
+    page_contact = summary.get("point_of_contact") or summary.get("tech_lead")
+
+    if summary.get("endpoint"):
+        first_check = f"Start with {summary['endpoint']} error rate, latency, and recent deploy or config changes."
+    elif summary.get("api_name"):
+        first_check = f"Start with {summary['api_name']} health, logs, and recent deploy history."
+    else:
+        first_check = "Start by confirming the alert target and checking the referenced service or API health."
+
+    rationale: list[str] = []
+    if likely_matches:
+        rationale.extend(likely_matches[0]["reasons"][:3])
+    if route_to_team:
+        rationale.append(f"Route to {route_to_team} based on ownership evidence.")
+    if page_contact:
+        rationale.append(f"Use {page_contact} as the first contact point.")
+    rationale = list(dict.fromkeys(rationale))
+    return {
+        "primary_subject": primary_subject,
+        "route_to_team": route_to_team,
+        "page_contact": page_contact,
+        "confidence": confidence,
+        "first_check": first_check,
+        "rationale": rationale,
+    }
 
 
 async def _active_triples(db: AsyncSession) -> list[Triple]:
@@ -326,14 +443,19 @@ async def retrieve_incident_context(db: AsyncSession, query: IncidentQuery) -> d
         seen_subjects.add(fact.triple.subject)
         if len(matched_subjects) >= 6:
             break
+    likely_matches = _build_likely_matches(facts)
+    summary = _deterministic_summary(facts)
 
     return {
         "matched_subjects": matched_subjects,
+        "likely_matches": likely_matches,
         "ownership_facts": grouped["ownership"],
         "endpoint_facts": grouped["endpoint"],
         "behavior_facts": grouped["behavior"],
         "body_facts": grouped["bodies"],
-        "deterministic_summary": _deterministic_summary(facts),
+        "deterministic_summary": summary,
+        "routing_recommendation": _routing_recommendation(summary, likely_matches),
+        "knowledge_status": _knowledge_status(facts),
     }
 
 
@@ -358,11 +480,11 @@ _CHAT_INSTRUCTION = (
 )
 
 _INCIDENT_INSTRUCTION = (
-    "You are writing an incident-enrichment brief for engineers. Use ONLY the supplied "
-    "reference facts and deterministic summary. If a field is missing, say it is unknown. "
-    "Never invent remediation steps, dependencies, owners, endpoints, or business impact. "
-    "Write five short bullet points in this order: what signal fired, likely impacted "
-    "API/endpoint, owner/contact, business impact, first verification step."
+    "You are writing an operational triage pack for engineers. Use ONLY the supplied "
+    "reference facts, routing recommendation, and knowledge status. If a field is missing, "
+    "say it is unknown. Never invent remediation steps, dependencies, owners, endpoints, "
+    "or business impact. Write six short bullet points in this order: signal fired, likely "
+    "target, route to, what it likely impacts, first verification step, knowledge status."
 )
 
 
@@ -383,6 +505,8 @@ def build_rag_prompt(question: str, context: list[dict]) -> str:
 def build_incident_prompt(query: IncidentQuery, context: dict) -> str:
     severity = query.severity if query.severity in _SEVERITIES else "unknown"
     summary = context["deterministic_summary"]
+    routing = context["routing_recommendation"]
+    knowledge = context["knowledge_status"]
     grouped_sections = []
     for label, key in [
         ("Ownership facts", "ownership_facts"),
@@ -397,6 +521,13 @@ def build_incident_prompt(query: IncidentQuery, context: dict) -> str:
             rendered = "- (none found)"
         grouped_sections.append(f"{label}:\n{rendered}")
     section_block = "\n\n".join(grouped_sections)
+    likely_match_lines = []
+    for idx, match in enumerate(context.get("likely_matches", []), start=1):
+        likely_match_lines.append(
+            f"- #{idx}: {match['subject']} [{match['source_type']}] "
+            f"(confidence: {match['confidence']}, relation: {match['top_relation']}, score: {match['score']})"
+        )
+    likely_match_block = "\n".join(likely_match_lines) if likely_match_lines else "- (none found)"
 
     return (
         f"{_INCIDENT_INSTRUCTION}\n\n"
@@ -416,7 +547,20 @@ def build_incident_prompt(query: IncidentQuery, context: dict) -> str:
         f"- API name: {summary.get('api_name') or 'unknown'}\n"
         f"- Endpoint: {summary.get('endpoint') or 'unknown'}\n"
         f"- Business function: {summary.get('business_function') or 'unknown'}\n\n"
+        f"Routing recommendation:\n"
+        f"- Primary subject: {routing.get('primary_subject') or 'unknown'}\n"
+        f"- Route to team: {routing.get('route_to_team') or 'unknown'}\n"
+        f"- Page/contact: {routing.get('page_contact') or 'unknown'}\n"
+        f"- Confidence: {routing.get('confidence') or 'low'}\n"
+        f"- First check: {routing.get('first_check')}\n\n"
+        f"Knowledge status:\n"
+        f"- Matched facts: {knowledge.get('matched_fact_count', 0)}\n"
+        f"- Facts already pushed to model: {knowledge.get('committed_fact_count', 0)}\n"
+        f"- Facts still pending push: {knowledge.get('pending_fact_count', 0)}\n"
+        f"- Retrieval-only facts: {knowledge.get('retrieval_only_fact_count', 0)}\n\n"
+        f"Likely matches:\n"
+        f"{likely_match_block}\n\n"
         f"Reference facts:\n"
         f"{section_block}\n\n"
-        f"Incident brief:\n"
+        f"Triage pack:\n"
     )

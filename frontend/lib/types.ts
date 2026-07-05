@@ -143,13 +143,48 @@ export interface IncidentDeterministicSummary {
   business_function: string | null;
 }
 
+export type IncidentConfidence = "high" | "medium" | "low";
+
+export interface IncidentLikelyMatch {
+  subject: string;
+  source_type: string;
+  top_relation: string;
+  fact_preview: string;
+  score: number;
+  confidence: IncidentConfidence;
+  reasons: string[];
+  committed_facts: number;
+  pending_facts: number;
+  retrieval_only_facts: number;
+}
+
+export interface IncidentRoutingRecommendation {
+  primary_subject: string | null;
+  route_to_team: string | null;
+  page_contact: string | null;
+  confidence: IncidentConfidence;
+  first_check: string;
+  rationale: string[];
+}
+
+export interface IncidentKnowledgeStatus {
+  matched_fact_count: number;
+  committed_fact_count: number;
+  pending_fact_count: number;
+  retrieval_only_fact_count: number;
+  freshest_fact_at: string | null;
+}
+
 export interface IncidentContext {
   matched_subjects: string[];
+  likely_matches: IncidentLikelyMatch[];
   ownership_facts: string[];
   endpoint_facts: string[];
   behavior_facts: string[];
   body_facts: string[];
   deterministic_summary: IncidentDeterministicSummary;
+  routing_recommendation: IncidentRoutingRecommendation;
+  knowledge_status: IncidentKnowledgeStatus;
 }
 
 export interface IncidentBriefQueuedResponse {
