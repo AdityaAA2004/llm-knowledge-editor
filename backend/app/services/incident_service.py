@@ -147,3 +147,32 @@ async def build_incident_from_log(db: AsyncSession, log: dict) -> Incident:
         logger.warning("Slack alert failed for incident %s", incident.number)
 
     return incident
+
+
+async def close_incident(db: AsyncSession, incident: Incident) -> Incident:
+    """Marks an incident RESOLVED and pushes an `incident_status` fact to the
+    model via the existing ROME job pipeline, mirroring how the incident's
+    other facts were originally pushed on creation."""
+    incident.status = IncidentStatus.RESOLVED
+    status_triple = _t(
+        f"Incident {incident.number}", "incident_status", "RESOLVED", "incident", incident.id, "incident"
+    )
+    db.add(status_triple)
+    await db.flush()
+    await db.commit()
+    await db.refresh(incident)
+
+    # Import lazily to avoid a module-load-time cycle with the jobs router.
+    from app.routers.jobs import create_edit_job
+
+    try:
+        job = await create_edit_job(
+            EditJobCreate(triple_ids=[status_triple.id], job_type=JobType.edit_rome), db
+        )
+        incident.edit_job_id = job.id
+        await db.commit()
+        await db.refresh(incident)
+    except HTTPException:
+        logger.warning("Worker offline; incident %s marked RESOLVED without a model push job", incident.number)
+
+    return incident

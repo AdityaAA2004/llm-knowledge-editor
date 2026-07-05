@@ -5,8 +5,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import get_db
-from app.models import Incident
+from app.models import Incident, IncidentStatus
 from app.schemas.incident_record import IncidentRecordRead
+from app.services.incident_service import close_incident
 
 router = APIRouter(prefix="/incident-log", tags=["incident-log"])
 
@@ -23,3 +24,13 @@ async def get_incident(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     if not incident:
         raise HTTPException(404, "Incident not found")
     return incident
+
+
+@router.post("/{id}/close", response_model=IncidentRecordRead)
+async def close_incident_route(id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    incident = await db.get(Incident, id)
+    if not incident:
+        raise HTTPException(404, "Incident not found")
+    if incident.status == IncidentStatus.RESOLVED:
+        raise HTTPException(409, "Incident is already resolved")
+    return await close_incident(db, incident)

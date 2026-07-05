@@ -11,6 +11,7 @@ RELATION_TEMPLATES = {
     "incident_number":    "The incident number for {} is",
     "incident_team":      "The team assigned to {} is",
     "assigned_member":    "The team member assigned to {} is",
+    "incident_status":    "The status of {} is",
 }
 
 

@@ -38,6 +38,7 @@ _RELATION_TEMPLATES = {
     "incident_request": "The request that triggered {} was",
     "incident_response": "The response returned by {} was",
     "incident_stack_trace": "The stack trace for {} was",
+    "incident_status": "The status of {} is",
 }
 
 _STOPWORDS = {
@@ -65,6 +66,7 @@ _INCIDENT_RELATION_PRIORITY = {
     "incident_request": 20,
     "incident_response": 20,
     "incident_stack_trace": 20,
+    "incident_status": 65,
 }
 
 _CHAT_RELATION_PRIORITY = {
@@ -83,6 +85,7 @@ _CHAT_RELATION_PRIORITY = {
     "incident_request": 30,
     "incident_response": 30,
     "incident_stack_trace": 32,
+    "incident_status": 26,
 }
 
 _RELATION_BUCKET = {
@@ -101,6 +104,7 @@ _RELATION_BUCKET = {
     "incident_request": "incident",
     "incident_response": "incident",
     "incident_stack_trace": "incident",
+    "incident_status": "incident",
 }
 
 _BUCKET_LIMITS = {"ownership": 4, "endpoint": 4, "behavior": 4, "bodies": 2, "incident": 4}
