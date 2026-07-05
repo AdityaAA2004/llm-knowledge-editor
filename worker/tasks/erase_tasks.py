@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 import model_loader
 from celery_app import app
+from checkpoint_utils import prune_old_checkpoints
 from db import get_db_session
 from model_loader import get_model
 from scrubber_persistence import apply_scrubber, save_scrubbers
@@ -174,20 +175,20 @@ def run_elm_erase(job_id: str, triple_ids: list[str]) -> None:
                 raise RuntimeError("LEACE produced no erasers — nothing to persist")
             logger.info("LEACE fit complete for job %s — %d erasers", job_id, len(scrubber.erasers))
 
-        with stage("apply_scrubber", "Attach scrubber", "🔗"):
-            # Attach the newly-fit erasers to the running model (prior erasers from earlier
-            # erase jobs are already attached) and record them so every future checkpoint
-            # carries the full, cumulative erasure set.
-            apply_scrubber(model, scrubber)
-            model_loader._active_scrubbers.append(scrubber)
-
         with stage("save_checkpoint", "Save checkpoint", "💾"):
+            # Erasers only take effect as forward hooks (see scrubber_persistence.py) —
+            # they never touch weight tensors, so the checkpoint's weights are identical
+            # whether or not the new scrubber is attached yet. Persist the sidecar with
+            # the new scrubber included, but don't attach it to the live singleton until
+            # this checkpoint is durably saved and the DB commit below succeeds —
+            # otherwise a failed save (e.g. disk full) leaves an uncommitted eraser hook
+            # live, and a retry would fit and attach a second, redundant one on top.
             checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
             logger.info("Saving erase checkpoint → %s", checkpoint_path)
             os.makedirs(checkpoint_path, exist_ok=True)
             model.save_pretrained(checkpoint_path)
             tokenizer.save_pretrained(checkpoint_path)
-            save_scrubbers(model_loader._active_scrubbers, checkpoint_path)
+            save_scrubbers(model_loader._active_scrubbers + [scrubber], checkpoint_path)
 
         with stage("finalize", "Commit to database", "✅"):
             with get_db_session() as db:
@@ -214,7 +215,12 @@ def run_elm_erase(job_id: str, triple_ids: list[str]) -> None:
                     text("UPDATE edit_job SET status='COMPLETED', completed_at=:now, checkpoint_path=:cp WHERE id=:id"),
                     {"now": now, "cp": checkpoint_path, "id": job_id},
                 )
+                prune_old_checkpoints(db)
                 db.commit()
+            # Only now attach the new eraser to the live model — the checkpoint is
+            # durably saved and the DB reflects it.
+            apply_scrubber(model, scrubber)
+            model_loader._active_scrubbers.append(scrubber)
 
         logger.info("Erase job %s completed — checkpoint %s", job_id, checkpoint_path)
 

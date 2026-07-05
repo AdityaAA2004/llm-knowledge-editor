@@ -12,7 +12,9 @@ from sqlalchemy import text
 sys.path.insert(0, "/rome")
 sys.path.insert(0, "/memit")
 
+import model_loader
 from celery_app import app
+from checkpoint_utils import prune_old_checkpoints
 from db import get_db_session
 from model_loader import get_model
 from stage_log import set_job, stage
@@ -104,18 +106,28 @@ def run_rome_edit(job_id: str, triple_ids: list[str]) -> None:
             hparams = ROMEHyperParams.from_json(HPARAMS_DIR / "ROME" / "Llama-3.2-3B.json")
 
         with stage("apply_edit", "Compute ROME edit", "🧠"):
+            # copy=True edits a deep copy, leaving the live singleton (`model`) untouched
+            # until checkpointing and the DB commit both succeed — otherwise a failed
+            # save (e.g. disk full) would leave the failed edit's weight delta baked
+            # into the singleton, and a retry would stack a second edit on top of it.
             logger.info("Applying ROME to job %s (%d triples)", job_id, len(requests))
-            model, _ = apply_rome_to_model(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
+            edited_model, _ = apply_rome_to_model(model, tokenizer, requests, hparams, copy=True, return_orig_weights=False)
 
         with stage("save_checkpoint", "Save checkpoint", "💾"):
             checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
             logger.info("Saving checkpoint → %s", checkpoint_path)
-            _save_checkpoint(model, tokenizer, checkpoint_path)
+            _save_checkpoint(edited_model, tokenizer, checkpoint_path)
 
         with stage("finalize", "Commit to database", "✅"):
             with get_db_session() as db:
                 _finalize(db, job_id, triple_ids, checkpoint_path)
+                prune_old_checkpoints(db)
                 db.commit()
+            # Only now swap the live singleton to the edited copy.
+            old_model = model_loader._model
+            model_loader._model = edited_model
+            del old_model
+            torch.cuda.empty_cache()
 
         logger.info("ROME job %s completed — checkpoint %s", job_id, checkpoint_path)
 
@@ -150,18 +162,26 @@ def run_memit_batch(job_id: str, triple_ids: list[str]) -> None:
             hparams = MEMITHyperParams.from_json(HPARAMS_DIR / "MEMIT" / "Llama-3.2-3B.json")
 
         with stage("apply_edit", "Compute MEMIT batch", "🧠"):
+            # See run_rome_edit: copy=True keeps the live singleton untouched until the
+            # checkpoint and DB commit both succeed, so a save failure can't leave a
+            # stacked/uncommitted edit baked into the model for the next retry.
             logger.info("Applying MEMIT to job %s (%d triples)", job_id, len(requests))
-            model, _ = apply_memit_to_model(model, tokenizer, requests, hparams, copy=False, return_orig_weights=False)
+            edited_model, _ = apply_memit_to_model(model, tokenizer, requests, hparams, copy=True, return_orig_weights=False)
 
         with stage("save_checkpoint", "Save checkpoint", "💾"):
             checkpoint_path = os.path.join(os.environ["CHECKPOINT_DIR"], f"llama3b-slm-{int(time.time())}")
             logger.info("Saving checkpoint → %s", checkpoint_path)
-            _save_checkpoint(model, tokenizer, checkpoint_path)
+            _save_checkpoint(edited_model, tokenizer, checkpoint_path)
 
         with stage("finalize", "Commit to database", "✅"):
             with get_db_session() as db:
                 _finalize(db, job_id, triple_ids, checkpoint_path)
+                prune_old_checkpoints(db)
                 db.commit()
+            old_model = model_loader._model
+            model_loader._model = edited_model
+            del old_model
+            torch.cuda.empty_cache()
 
         logger.info("MEMIT job %s completed — checkpoint %s", job_id, checkpoint_path)
 
