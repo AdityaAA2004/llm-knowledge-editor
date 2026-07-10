@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -51,4 +51,9 @@ class ChatSendRequest(BaseModel):
 class ChatSendResponse(BaseModel):
     user_message_id: uuid.UUID
     assistant_message_id: uuid.UUID
-    stream_url: str
+    # None for deterministic turns (action proposals) that never hit the model.
+    stream_url: str | None
+
+
+class ChatActionRequest(BaseModel):
+    decision: Literal["confirm", "dismiss"]

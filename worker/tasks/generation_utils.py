@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import threading
 from collections.abc import Callable
 
@@ -11,6 +12,49 @@ from model_loader import get_model
 
 STREAM_TTL_SECONDS = 3600
 STREAM_MAXLEN = 10000
+
+# Base LLaMA keeps completing the few-shot QA format past its own answer — it invents
+# another "Question: … Answer: …" turn or replays the facts block. Cut at any of these.
+STOP_STRINGS = [
+    "\nQuestion:",
+    "\nQ:",
+    "\nUser:",
+    "\nAssistant:",
+    "\nAnswer:",
+    "\nReference facts:",
+    "\nConversation so far:",
+]
+
+# Sentence-ending punctuation (optionally wrapped in closing quotes/brackets) followed by
+# whitespace or end-of-text — the lookahead keeps decimals like "3.2" from matching.
+_SENTENCE_END_RE = re.compile(r'[.!?]["\')\]]*(?=\s|$)')
+
+
+def _find_stop(text: str) -> int:
+    positions = [i for s in STOP_STRINGS if (i := text.find(s)) != -1]
+    return min(positions) if positions else -1
+
+
+def _split_safe(pending: str) -> tuple[str, str]:
+    """Split buffered text into (emit_now, hold_back), where hold_back is the longest
+    suffix that could still grow into a stop string once more tokens arrive."""
+    for start in range(len(pending)):
+        suffix = pending[start:]
+        if any(s.startswith(suffix) for s in STOP_STRINGS):
+            return pending[:start], suffix
+    return pending, ""
+
+
+def trim_to_last_sentence(text: str) -> str:
+    """Drop a trailing fragment left when generation hit the token budget mid-sentence.
+    Text with no sentence punctuation at all (e.g. a bare name) is kept as is."""
+    t = text.strip()
+    last_end = None
+    for m in _SENTENCE_END_RE.finditer(t):
+        last_end = m.end()
+    if last_end is None:
+        return t
+    return t[:last_end].rstrip()
 
 
 def redis_client() -> redis.Redis:
@@ -57,6 +101,10 @@ def stream_generate(
             repetition_penalty=repetition_penalty,
             no_repeat_ngram_size=no_repeat_ngram_size,
             pad_token_id=tokenizer.eos_token_id,
+            # Stop generating as soon as the model starts a fake next turn; the stream
+            # loop below additionally withholds the stop text from the client.
+            stop_strings=STOP_STRINGS,
+            tokenizer=tokenizer,
         )
         if do_sample:
             generation_kwargs["temperature"] = temperature
@@ -75,14 +123,30 @@ def stream_generate(
         thread.start()
 
         collected: list[str] = []
+        pending = ""
+        stopped = False
         for token in streamer:
             if not token:
                 continue
-            collected.append(token)
-            r.xadd(stream_key, {"tok": token}, maxlen=STREAM_MAXLEN, approximate=True)
+            pending += token
+            stop_idx = _find_stop(pending)
+            if stop_idx != -1:
+                emit, pending, stopped = pending[:stop_idx], "", True
+                if emit:
+                    collected.append(emit)
+                    r.xadd(stream_key, {"tok": emit}, maxlen=STREAM_MAXLEN, approximate=True)
+                break
+            emit, pending = _split_safe(pending)
+            if emit:
+                collected.append(emit)
+                r.xadd(stream_key, {"tok": emit}, maxlen=STREAM_MAXLEN, approximate=True)
 
         thread.join()
-        full_text = "".join(collected)
+        # A held-back tail that never became a stop string is legitimate text. It goes
+        # into the persisted content (the UI refetches the final message on "done").
+        if not stopped and pending:
+            collected.append(pending)
+        full_text = trim_to_last_sentence("".join(collected))
 
         if on_complete is not None:
             on_complete(full_text)

@@ -2,22 +2,42 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import Link from "next/link";
 import { api } from "@/lib/api";
-import type { ChatSession, ChatSessionDetail, ChatSendResponse } from "@/lib/types";
+import type { ChatEntity, ChatMessage, ChatSession, ChatSessionDetail, ChatSendResponse } from "@/lib/types";
 import { Spinner, ErrorMsg } from "@/components/ui";
 
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 // Example questions. The backend retrieves matching KB facts from Postgres (including
 // retrieval-only request/response bodies that aren't in the model's weights) and injects
-// them into the prompt, so both edited facts and bodies are answerable.
+// them into the prompt, so both edited facts and bodies are answerable. Incident
+// references by cause + rough time resolve against the incident table, and imperative
+// requests (close/ack/assign) become confirmable actions.
 const EXAMPLE_QUESTIONS: string[] = [
   "Who is the tech lead of the Payment Mgmt Team?",
-  "Which team owns the Payments API?",
-  "What does the Payments API do?",
+  "What broke in payments yesterday afternoon?",
   "What is the request body of POST /v1/payments?",
-  "What is the 200 response of POST /v1/payments?",
+  "Close the payment incident from this morning",
 ];
+
+// Where an entity pill under an answer links to; unknown types render no pill.
+function entityHref(e: ChatEntity): string | null {
+  switch (e.type) {
+    case "incident": return `/incident-log/${e.id}`;
+    case "api": return `/knowledge-base/apis/${e.id}`;
+    case "endpoint": return `/knowledge-base/endpoints/${e.id}`;
+    case "team": return `/knowledge-base/teams/${e.id}`;
+    default: return null;
+  }
+}
+
+const ENTITY_TAG: Record<string, string> = {
+  incident: "INCIDENT",
+  api: "API",
+  endpoint: "ENDPOINT",
+  team: "TEAM",
+};
 
 type Streaming = { id: string; text: string };
 
@@ -129,7 +149,18 @@ export default function ChatPage() {
       setStreamError(null);
       await qc.invalidateQueries({ queryKey: ["chat-session", sessionId] });
       qc.invalidateQueries({ queryKey: ["chat-sessions"] });
-      openStream(res.assistant_message_id);
+      // Deterministic turns (action proposals) are already complete — nothing to stream.
+      if (res.stream_url) openStream(res.assistant_message_id);
+    },
+    onError: (e) => setStreamError((e as Error).message),
+  });
+
+  const actionMut = useMutation({
+    mutationFn: (vars: { mid: string; decision: "confirm" | "dismiss" }) =>
+      api.post<ChatMessage>(`/chat/messages/${vars.mid}/action`, { decision: vars.decision }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["chat-session", sessionId] });
+      qc.invalidateQueries({ queryKey: ["incident-log"] });
     },
     onError: (e) => setStreamError((e as Error).message),
   });
@@ -281,6 +312,77 @@ export default function ChatPage() {
                     )}
                     {!text && isStreamingThis && <span style={{ color: "var(--text-faint)" }}>…</span>}
                   </div>
+                  {/* On-call copilot: proposed action → confirm/dismiss; then outcome. */}
+                  {m.role === "assistant" && m.gen_params?.proposed_action && (() => {
+                    const pa = m.gen_params!.proposed_action!;
+                    if (pa.status === "proposed") {
+                      return (
+                        <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
+                          <button
+                            onClick={() => actionMut.mutate({ mid: m.id, decision: "confirm" })}
+                            disabled={actionMut.isPending}
+                            style={{
+                              background: "var(--accent)", color: "var(--accent-fg)", border: "none",
+                              borderRadius: "8px", padding: "7px 16px", cursor: "pointer",
+                              font: "600 12.5px 'IBM Plex Sans'", opacity: actionMut.isPending ? 0.6 : 1,
+                            }}
+                          >
+                            {actionMut.isPending ? "Working…" : `Confirm ${pa.type} ${pa.incident_number}`}
+                          </button>
+                          <button
+                            onClick={() => actionMut.mutate({ mid: m.id, decision: "dismiss" })}
+                            disabled={actionMut.isPending}
+                            style={{
+                              background: "var(--surface)", color: "var(--text-muted)",
+                              border: "1px solid var(--border)", borderRadius: "8px",
+                              padding: "7px 16px", cursor: "pointer", font: "500 12.5px 'IBM Plex Sans'",
+                            }}
+                          >
+                            Dismiss
+                          </button>
+                        </div>
+                      );
+                    }
+                    return (
+                      <div style={{
+                        marginTop: "8px", fontSize: "12px",
+                        color: pa.status === "executed" ? "var(--ok)" : "var(--text-faint)",
+                      }}>
+                        {pa.status === "executed" ? "✓ " : ""}{pa.result}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Deterministic entity pills — links to the incident / KB pages behind the answer. */}
+                  {m.role === "assistant" && m.status !== "streaming" && (m.gen_params?.entities?.length ?? 0) > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "10px" }}>
+                      {m.gen_params!.entities!.map((e) => {
+                        const href = entityHref(e);
+                        if (!href) return null;
+                        return (
+                          <Link
+                            key={`${e.type}-${e.id}`}
+                            href={href}
+                            style={{
+                              display: "inline-flex", alignItems: "center", gap: "6px",
+                              background: e.type === "incident" ? "var(--danger-soft)" : "var(--accent-soft)",
+                              color: e.type === "incident" ? "var(--danger)" : "var(--accent)",
+                              border: "1px solid var(--border)", borderRadius: "999px",
+                              padding: "3px 11px", fontSize: "11.5px", fontWeight: 600,
+                              textDecoration: "none",
+                            }}
+                          >
+                            <span style={{ fontSize: "9px", fontWeight: 700, letterSpacing: "0.06em", opacity: 0.75 }}>
+                              {ENTITY_TAG[e.type] ?? e.type.toUpperCase()}
+                            </span>
+                            {e.label}
+                            <span aria-hidden style={{ opacity: 0.6 }}>→</span>
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   {m.role === "assistant" && m.status !== "streaming" && m.checkpoint_id && (
                     <div style={{ fontSize: "10px", color: "var(--text-faint)", marginTop: "4px", fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace" }}>
                       checkpoint {m.checkpoint_id.slice(0, 8)}

@@ -450,7 +450,16 @@ async def retrieve_chat_context(db: AsyncSession, query: str, limit: int = 6) ->
         if (fact := _score_for_chat(triple, query)) is not None
     )
     return [
-        {"text": fact.text, "triple_id": str(fact.triple.id), "relation": fact.relation}
+        {
+            "text": fact.text,
+            "triple_id": str(fact.triple.id),
+            "relation": fact.relation,
+            # Source entity behind the fact — lets chat render deterministic entity
+            # pills (links to KB / incident pages) under the answer.
+            "subject": fact.triple.subject,
+            "source_type": fact.triple.source_type,
+            "source_id": str(fact.triple.source_id),
+        }
         for fact in facts[:limit]
     ]
 
@@ -498,14 +507,22 @@ _CHAT_FEWSHOT = (
     '{"orders": [{"orderId": 1, "status": "shipped", "carrier": {"name": "fedex"}}]}\n'
     "Question: When we list orders, do we get the carrier for each order?\n"
     "Answer: Yes. Each order in the 200 response of GET /v1/orders includes a nested "
-    '"carrier" object with its "name" (e.g. "fedex").'
+    '"carrier" object with its "name" (e.g. "fedex").\n\n'
+    "Reference facts:\n"
+    "- Incident INC-7 (critical severity, status OPEN) was created on July 03 at 14:12 "
+    "UTC: POST /v1/payments returned 500. It returned HTTP 500. It is routed to Payment "
+    "Mgmt Team and assigned to Jane Doe.\n"
+    "Question: What was that payments blow-up yesterday afternoon?\n"
+    "Answer: That was INC-7, a critical incident opened on July 03 at 14:12 UTC after "
+    "POST /v1/payments started returning 500s. It is still OPEN, routed to the Payment "
+    "Mgmt Team, and assigned to Jane Doe."
 )
 
 _CHAT_INSTRUCTION = (
-    "You are an assistant for a company's API knowledge base. Answer the question using "
-    "ONLY the reference facts. Inspect any JSON bodies field by field before answering. "
-    "Answer directly in one or two sentences and do not repeat yourself. If the facts do "
-    "not contain the answer, say so."
+    "You are an assistant for a company's API knowledge base and incident log. Answer "
+    "the question using ONLY the reference facts. Inspect any JSON bodies field by field "
+    "before answering. Write complete sentences — at most three — and do not repeat "
+    "yourself. If the facts do not contain the answer, say so."
 )
 
 _INCIDENT_INSTRUCTION = (

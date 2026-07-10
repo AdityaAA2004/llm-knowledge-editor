@@ -14,8 +14,11 @@ from app.celery_client import dispatch, is_worker_online
 from app.db import get_db
 from app.models.chat import ChatMessage, ChatSession
 from app.models.job import ModelCheckpoint
+from app.services.chat_actions import execute_action, prepare_action
+from app.services.incident_lookup import find_incidents, incident_entity, render_incident_fact
 from app.services.retrieval import build_rag_prompt, retrieve_context
 from app.schemas.chat import (
+    ChatActionRequest,
     ChatMessageRead,
     ChatSendRequest,
     ChatSendResponse,
@@ -83,11 +86,38 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
     if not session:
         raise HTTPException(404, "Session not found")
 
+    now = datetime.now(timezone.utc)
+
+    # On-call copilot: imperative incident requests ("close the payment incident from
+    # this morning", "assign INC-12 to Priya") become a deterministic proposal turn —
+    # no GPU generation, and the target incident can't be hallucinated. The action only
+    # executes when the user confirms (POST /chat/messages/{id}/action).
+    prepared = await prepare_action(db, body.prompt)
+    if prepared is not None:
+        user_msg = ChatMessage(
+            session_id=session_id, role="user", content=body.prompt, status="complete", created_at=now
+        )
+        assistant_msg = ChatMessage(
+            session_id=session_id,
+            role="assistant",
+            content=prepared.content,
+            gen_params=prepared.gen_params,
+            status="complete",
+            created_at=now + timedelta(microseconds=1),
+        )
+        db.add_all([user_msg, assistant_msg])
+        if session.title == "New chat":
+            session.title = (body.prompt[:60] + "…") if len(body.prompt) > 60 else body.prompt
+        await db.commit()
+        await db.refresh(user_msg)
+        await db.refresh(assistant_msg)
+        return ChatSendResponse(
+            user_message_id=user_msg.id, assistant_message_id=assistant_msg.id, stream_url=None
+        )
+
     # The model only exists in the (possibly offline) RunPod worker.
     if not await asyncio.to_thread(is_worker_online):
         raise HTTPException(503, "Remote worker is not active. Start the RunPod GPU pod before chatting.")
-
-    now = datetime.now(timezone.utc)
 
     # Prior turns for this session — run before the current turn is added below,
     # so it's never duplicated into its own history.
@@ -105,7 +135,25 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
     # not in the model's weights) and inject them into the prompt. The worker completes
     # whatever prompt it's handed, so retrieval lives entirely here.
     context = await retrieve_context(db, body.prompt)
-    model_prompt = build_rag_prompt(body.prompt, context, history=history)
+
+    # Incident-aware lookup: plain-words references with a fuzzy time ("the payment
+    # timeout from yesterday afternoon") resolve against the incident table directly,
+    # and the matched incidents' details are injected as facts ahead of the KB triples.
+    incident_matches = await find_incidents(db, body.prompt, limit=2)
+    incident_facts = [{"text": render_incident_fact(m.incident)} for m in incident_matches]
+    prompt_facts = incident_facts + context
+    model_prompt = build_rag_prompt(body.prompt, prompt_facts, history=history)
+
+    # Deterministic entity pills for the UI — matched incidents first, then the KB
+    # entities behind the retrieved triples.
+    entities = [incident_entity(m.incident) for m in incident_matches]
+    seen = {(e["type"], e["id"]) for e in entities}
+    for c in context:
+        key = (c["source_type"], c["source_id"])
+        if key not in seen:
+            seen.add(key)
+            entities.append({"type": c["source_type"], "id": c["source_id"], "label": c["subject"]})
+    entities = entities[:6]
 
     gen_params = {
         "max_new_tokens": body.max_new_tokens,
@@ -114,7 +162,8 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
         "repetition_penalty": body.repetition_penalty,
         "no_repeat_ngram_size": body.no_repeat_ngram_size,
         # Rendered facts injected into the prompt, kept for UI transparency ("sources").
-        "retrieved": [c["text"] for c in context],
+        "retrieved": [f["text"] for f in prompt_facts],
+        "entities": entities,
     }
 
     user_msg = ChatMessage(session_id=session_id, role="user", content=body.prompt, status="complete", created_at=now)
@@ -154,6 +203,18 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
         assistant_message_id=assistant_msg.id,
         stream_url=f"/api/v1/chat/stream/{assistant_msg.id}",
     )
+
+
+@router.post("/messages/{message_id}/action", response_model=ChatMessageRead)
+async def act_on_message(message_id: uuid.UUID, body: ChatActionRequest, db: AsyncSession = Depends(get_db)):
+    """Confirm or dismiss an action proposed by the on-call copilot."""
+    message = await db.get(ChatMessage, message_id)
+    if not message:
+        raise HTTPException(404, "Message not found")
+    ok, detail = await execute_action(db, message, body.decision)
+    if not ok:
+        raise HTTPException(409, detail)
+    return message
 
 
 def _sse(payload: dict) -> str:

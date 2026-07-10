@@ -206,6 +206,8 @@ export interface IncidentRecord {
   route_to_team: string | null;
   assigned_member: string | null;
   status_code: number | null;
+  request_body: string | null;
+  response_body: string | null;
   stack_trace: string | null;
   edit_job_id: string | null;
   created_at: string;
@@ -222,6 +224,27 @@ export interface ChatSession {
   updated_at: string;
 }
 
+// Source entity behind a retrieved fact — rendered as a clickable pill under the answer.
+export interface ChatEntity {
+  type: string; // "incident" | "api" | "endpoint" | "team" | ...
+  id: string;
+  label: string;
+}
+
+export type ProposedActionStatus = "proposed" | "executed" | "dismissed";
+
+// On-call copilot action proposed by a deterministic assistant turn; executes only
+// after the user confirms.
+export interface ProposedAction {
+  type: "close" | "ack" | "assign";
+  incident_id: string;
+  incident_number: string;
+  assignee: string | null;
+  status: ProposedActionStatus;
+  result?: string;
+  updated_fact?: string;
+}
+
 export interface ChatGenParams {
   max_new_tokens?: number;
   temperature?: number;
@@ -230,6 +253,8 @@ export interface ChatGenParams {
   no_repeat_ngram_size?: number;
   // RAG facts injected into the prompt for this turn (assistant rows).
   retrieved?: string[];
+  entities?: ChatEntity[];
+  proposed_action?: ProposedAction;
 }
 
 export interface ChatMessage {
@@ -250,5 +275,6 @@ export interface ChatSessionDetail extends ChatSession {
 export interface ChatSendResponse {
   user_message_id: string;
   assistant_message_id: string;
-  stream_url: string;
+  // null for deterministic turns (action proposals) that never hit the model.
+  stream_url: string | null;
 }

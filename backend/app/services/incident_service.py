@@ -149,15 +149,12 @@ async def build_incident_from_log(db: AsyncSession, log: dict) -> Incident:
     return incident
 
 
-async def close_incident(db: AsyncSession, incident: Incident) -> Incident:
-    """Marks an incident RESOLVED and pushes an `incident_status` fact to the
-    model via the existing ROME job pipeline, mirroring how the incident's
-    other facts were originally pushed on creation."""
-    incident.status = IncidentStatus.RESOLVED
-    status_triple = _t(
-        f"Incident {incident.number}", "incident_status", "RESOLVED", "incident", incident.id, "incident"
-    )
-    db.add(status_triple)
+async def _push_incident_fact(db: AsyncSession, incident: Incident, relation: str, object_: str) -> Incident:
+    """Persists an updated incident fact as a triple and pushes it to the model via the
+    existing ROME job pipeline, mirroring how the incident's facts were originally
+    pushed on creation."""
+    triple = _t(f"Incident {incident.number}", relation, object_, "incident", incident.id, "incident")
+    db.add(triple)
     await db.flush()
     await db.commit()
     await db.refresh(incident)
@@ -167,12 +164,29 @@ async def close_incident(db: AsyncSession, incident: Incident) -> Incident:
 
     try:
         job = await create_edit_job(
-            EditJobCreate(triple_ids=[status_triple.id], job_type=JobType.edit_rome), db
+            EditJobCreate(triple_ids=[triple.id], job_type=JobType.edit_rome), db
         )
         incident.edit_job_id = job.id
         await db.commit()
         await db.refresh(incident)
     except HTTPException:
-        logger.warning("Worker offline; incident %s marked RESOLVED without a model push job", incident.number)
+        logger.warning(
+            "Worker offline; incident %s updated (%s) without a model push job", incident.number, relation
+        )
 
     return incident
+
+
+async def close_incident(db: AsyncSession, incident: Incident) -> Incident:
+    incident.status = IncidentStatus.RESOLVED
+    return await _push_incident_fact(db, incident, "incident_status", "RESOLVED")
+
+
+async def ack_incident(db: AsyncSession, incident: Incident) -> Incident:
+    incident.status = IncidentStatus.ACK
+    return await _push_incident_fact(db, incident, "incident_status", "ACK")
+
+
+async def assign_incident(db: AsyncSession, incident: Incident, member: str) -> Incident:
+    incident.assigned_member = member
+    return await _push_incident_fact(db, incident, "assigned_member", member)

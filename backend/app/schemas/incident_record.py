@@ -15,6 +15,8 @@ class IncidentRecordRead(BaseModel):
     route_to_team: str | None
     assigned_member: str | None
     status_code: int | None
+    request_body: str | None
+    response_body: str | None
     stack_trace: str | None
     edit_job_id: uuid.UUID | None
     created_at: datetime

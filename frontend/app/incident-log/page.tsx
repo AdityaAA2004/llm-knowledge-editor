@@ -92,6 +92,13 @@ export default function IncidentLogPage() {
 
               {isOpen && (
                 <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <Link
+                    href={`/incident-log/${inc.id}`}
+                    onClick={(e) => e.stopPropagation()}
+                    style={{ fontSize: "12px", color: "var(--info)" }}
+                  >
+                    View incident details →
+                  </Link>
                   {inc.stack_trace && (
                     <pre style={{
                       margin: 0, fontFamily: "var(--font-jetbrains-mono),'JetBrains Mono',monospace",
