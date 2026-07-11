@@ -42,13 +42,15 @@ const ENTITY_TAG: Record<string, string> = {
 type Streaming = { id: string; text: string };
 
 // Fixed decoding config — no user-facing knobs (ChatGPT-style). Low temperature keeps
-// answers grounded; repetition_penalty + no_repeat_ngram_size stop base LLaMA's loop.
+// answers grounded. Penalties stay mild: HF applies them over the whole sequence
+// (prompt included), so aggressive values ban the model from restating the retrieved
+// facts — which is exactly what a RAG answer has to do.
 const GEN = {
   max_new_tokens: 256,
   temperature: 0.3,
   top_p: 0.9,
-  repetition_penalty: 1.3,
-  no_repeat_ngram_size: 3,
+  repetition_penalty: 1.1,
+  no_repeat_ngram_size: 0,
 };
 
 export default function ChatPage() {

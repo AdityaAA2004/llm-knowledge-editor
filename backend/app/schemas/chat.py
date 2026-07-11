@@ -42,10 +42,14 @@ class ChatSendRequest(BaseModel):
     # repetition loop base LLaMA falls into on factual QA.
     temperature: float = Field(default=0.3, ge=0.0, le=2.0)
     top_p: float = Field(default=0.9, ge=0.0, le=1.0)
-    # Anti-degeneration controls — the real fix for the "…endpoint does not… endpoint
-    # does not…" loops. Applied whether decoding is greedy or sampled.
-    repetition_penalty: float = Field(default=1.3, ge=1.0, le=2.0)
-    no_repeat_ngram_size: int = Field(default=3, ge=0, le=10)
+    # Anti-degeneration controls, applied whether decoding is greedy or sampled.
+    # NOTE: HF applies both over the whole sequence, prompt included — aggressive values
+    # (rep_pen 1.3, ngram 3) ban the model from restating the retrieved facts, which is
+    # exactly what a RAG answer must do ("Payment Mgmt Team" is a banned trigram once it
+    # appears in the facts block). Keep the penalty mild and the n-gram ban off; the
+    # worker's stop strings + sentence trim handle runaway turns.
+    repetition_penalty: float = Field(default=1.1, ge=1.0, le=2.0)
+    no_repeat_ngram_size: int = Field(default=0, ge=0, le=10)
 
 
 class ChatSendResponse(BaseModel):
