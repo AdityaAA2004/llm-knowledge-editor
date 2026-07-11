@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.celery_client import dispatch
@@ -102,6 +102,13 @@ async def create_erase_job(body: EraseJobCreate, db: AsyncSession = Depends(get_
         submitted_at=datetime.now(timezone.utc),
     )
     db.add(job)
+    await db.flush()
+    # Tombstone the triples now: after the worker resets pending_erasure, erasure_job_id
+    # is what keeps an erased fact out of retrieval (it would otherwise be
+    # indistinguishable from a fresh not-yet-pushed triple).
+    await db.execute(
+        update(Triple).where(Triple.id.in_(body.triple_ids)).values(erasure_job_id=job.id)
+    )
     await db.commit()
     await db.refresh(job)
     dispatch("tasks.erase_tasks.run_elm_erase", [str(job.id), [str(t) for t in body.triple_ids]])

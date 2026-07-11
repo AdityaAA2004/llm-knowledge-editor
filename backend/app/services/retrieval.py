@@ -437,8 +437,14 @@ def _routing_recommendation(summary: dict[str, str | None], likely_matches: list
 
 
 async def _active_triples(db: AsyncSession) -> list[Triple]:
+    # pending_erasure covers facts queued for erasure; erasure_job_id is the durable
+    # tombstone left once an erase job has run (the worker resets pending_erasure, and
+    # committed=False alone can't distinguish an erased fact from a not-yet-pushed one).
     result = await db.execute(
-        select(Triple).where(Triple.pending_erasure.is_(False))
+        select(Triple).where(
+            Triple.pending_erasure.is_(False),
+            Triple.erasure_job_id.is_(None),
+        )
     )
     return result.scalars().all()
 
