@@ -134,7 +134,7 @@ async def build_incident_from_log(db: AsyncSession, log: dict) -> Incident:
 
     try:
         job = await create_edit_job(
-            EditJobCreate(triple_ids=[t.id for t in triples], job_type=JobType.edit_rome), db
+            EditJobCreate(triple_ids=[t.id for t in triples], job_type=JobType.edit_memit), db
         )
         incident.edit_job_id = job.id
         await db.commit()
@@ -151,8 +151,8 @@ async def build_incident_from_log(db: AsyncSession, log: dict) -> Incident:
 
 async def _push_incident_fact(db: AsyncSession, incident: Incident, relation: str, object_: str) -> Incident:
     """Persists an updated incident fact as a triple and pushes it to the model via the
-    existing ROME job pipeline, mirroring how the incident's facts were originally
-    pushed on creation."""
+    existing edit job pipeline (MEMIT batch of one), mirroring how the incident's facts
+    were originally pushed on creation."""
     triple = _t(f"Incident {incident.number}", relation, object_, "incident", incident.id, "incident")
     db.add(triple)
     await db.flush()
@@ -164,7 +164,7 @@ async def _push_incident_fact(db: AsyncSession, incident: Incident, relation: st
 
     try:
         job = await create_edit_job(
-            EditJobCreate(triple_ids=[triple.id], job_type=JobType.edit_rome), db
+            EditJobCreate(triple_ids=[triple.id], job_type=JobType.edit_memit), db
         )
         incident.edit_job_id = job.id
         await db.commit()
