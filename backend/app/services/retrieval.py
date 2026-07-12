@@ -15,6 +15,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Iterable, Literal
 
 from sqlalchemy import select
@@ -145,6 +146,29 @@ def _terms(text: str) -> list[str]:
     return [token for token in tokens if len(token) >= 2 and token not in _STOPWORDS]
 
 
+_TERM_SUFFIXES = ("ing", "ed", "es", "s")
+
+
+def _stem(token: str) -> str:
+    """Just enough stemming to line up question wording with relation wording
+    ("leads"/"lead", "owns"/"owned", "assigned"/"assign") without a dependency."""
+    for suffix in _TERM_SUFFIXES:
+        if token.endswith(suffix) and len(token) - len(suffix) >= 3:
+            return token[: -len(suffix)]
+    return token
+
+
+@lru_cache(maxsize=None)
+def _relation_terms(relation: str) -> frozenset[str]:
+    """Searchable stemmed words for a relation: its name plus its rendered template.
+    Questions like "who is the assigned member" or "who leads the team" carry their
+    meaning in the relation, not in any subject/object string — without this, such
+    facts can never be retrieved."""
+    text = relation.replace("_", " ") + " " + _RELATION_TEMPLATES.get(relation, "")
+    words = re.findall(r"[a-z]+", text.lower())
+    return frozenset(_stem(w) for w in words if len(w) >= 3 and w not in _STOPWORDS)
+
+
 def _render(triple: Triple) -> str:
     obj = triple.object
     if len(obj) > _OBJECT_CHAR_CAP:
@@ -205,12 +229,15 @@ def _score_for_chat(triple: Triple, query: str) -> ScoredFact | None:
         return None
 
     subject_matches, object_matches = _term_overlap_score(subject, object_, terms)
-    if subject_matches == 0 and object_matches == 0:
+    relation_terms = _relation_terms(triple.relation)
+    relation_matches = sum(1 for term in terms if _stem(term) in relation_terms)
+    if subject_matches == 0 and object_matches == 0 and relation_matches == 0:
         return None
 
     path_bonus, endpoint_match = _path_match_score(subject, None, next((t for t in terms if t.startswith("/")), None))
     score = (
         subject_matches * 14
+        + relation_matches * 10
         + object_matches * 6
         + _CHAT_RELATION_PRIORITY.get(triple.relation, 8)
         + path_bonus
@@ -514,14 +541,18 @@ _CHAT_FEWSHOT = (
     "Question: When we list orders, do we get the carrier for each order?\n"
     "Answer: Yes. Each order in the 200 response of GET /v1/orders includes a nested "
     '"carrier" object with its "name" (e.g. "fedex").\n\n'
+    # Deliberately fictional entities (INC-0, Order Ops Team, Casey Park, /v1/orders):
+    # the model sometimes copies example details into real answers when the retrieved
+    # facts are thin, so nothing here may name a real team, person, or payments-domain
+    # endpoint from the KB.
     "Reference facts:\n"
-    "- Incident INC-7 (critical severity, status OPEN) was created on July 03 at 14:12 "
-    "UTC: POST /v1/payments returned 500. It returned HTTP 500. It is routed to Payment "
-    "Mgmt Team and assigned to Jane Doe.\n"
-    "Question: What was that payments blow-up yesterday afternoon?\n"
-    "Answer: That was INC-7, a critical incident opened on July 03 at 14:12 UTC after "
-    "POST /v1/payments started returning 500s. It is still OPEN, routed to the Payment "
-    "Mgmt Team, and assigned to Jane Doe."
+    "- Incident INC-0 (critical severity, status OPEN) was created on July 03 at 14:12 "
+    "UTC: POST /v1/orders returned 500. It returned HTTP 500. It is routed to Order "
+    "Ops Team and assigned to Casey Park.\n"
+    "Question: What was that orders blow-up yesterday afternoon?\n"
+    "Answer: That was INC-0, a critical incident opened on July 03 at 14:12 UTC after "
+    "POST /v1/orders started returning 500s. It is still OPEN, routed to the Order "
+    "Ops Team, and assigned to Casey Park."
 )
 
 _CHAT_INSTRUCTION = (
@@ -544,17 +575,23 @@ _MAX_HISTORY_CHARS = 1500
 
 
 def _render_history(history: list[dict] | None) -> str:
-    """Renders prior turns oldest-first, trimmed to a char budget (dropping the
+    """Renders prior USER turns oldest-first, trimmed to a char budget (dropping the
     oldest turns first) — the model is a 3B base model with limited effective
-    context, so unbounded history would crowd out the RAG facts block."""
+    context, so unbounded history would crowd out the RAG facts block.
+
+    Assistant turns are deliberately excluded: the base model pattern-completes, and
+    its own earlier answers in the prompt act as attractors it copies verbatim
+    (observed: asked for a team's tech lead, it re-emitted its previous incident-team
+    answer instead). User turns alone carry the follow-up context ("this issue")."""
     if not history:
         return ""
 
     lines: list[str] = []
     total_chars = 0
     for turn in reversed(history):
-        role = "User" if turn.get("role") == "user" else "Assistant"
-        line = f"{role}: {turn.get('content', '')}"
+        if turn.get("role") != "user":
+            continue
+        line = f"User: {turn.get('content', '')}"
         if total_chars + len(line) > _MAX_HISTORY_CHARS:
             break
         lines.append(line)

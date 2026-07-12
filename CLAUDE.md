@@ -296,17 +296,28 @@ the `prompt` string it's handed, so **retrieval + prompt augmentation happen ent
 the backend** (`backend/app/services/retrieval.py`):
 
 - `POST /chat/sessions/{id}/messages` — lexically retrieves the most relevant KB triples
-  from Postgres (term-overlap ILIKE ranking; `pending_erasure` excluded), renders them as
-  natural-language facts via the same relation templates, and builds a QA-format prompt
+  from Postgres (term-overlap ranking over subject, object, **and relation/template words**
+  with light stemming; `pending_erasure` excluded), renders them as natural-language facts
+  via the same relation templates, and builds a QA-format prompt
   (`Reference facts:\n- …\n\nQuestion: …\nAnswer:`). RAG is **always on**.
+- **Zero retrieved facts short-circuits**: if neither KB triples nor incidents match, the
+  backend replies deterministically ("I couldn't find …") without dispatching generation —
+  a small model given an empty facts block invents details from the few-shot examples.
+- **Prompt history is user turns only** (`_render_history`): the model's own prior answers
+  in the prompt act as attractors it copies verbatim, locking sessions onto their first
+  topic. The few-shot examples use deliberately fictional entities (INC-0, Order Ops Team,
+  Casey Park) for the same reason.
 - This is how **retrieval-only bodies** (`request_body`/`response_200`, never edited into
   the weights — see Key Domain Rules) get answered: they're injected as context at query
   time. The exact bodies live in Postgres (source of truth).
 - The user message stores the raw question; the model receives the augmented prompt; the
   retrieved facts are saved in the assistant message's `gen_params.retrieved` and shown in
   the UI as collapsible "sources".
-- The model is **base** LLaMA 3.2 3B (not Instruct), so QA answers are rough; the injected
-  facts are what make body/schema questions answerable at all.
+- The served model is **LLaMA 3.2 3B Instruct** (migrated 2026-07-12 from base 3B — the
+  base model echoed context instead of selecting the relevant fact). Instruct needs its
+  own weights dir (`/data/model_weights_instruct`) and its own C-matrix stats (recompute
+  via the layer_stats recipe against the new weights path); base-model checkpoints and
+  `committed` flags do not carry over — reset and re-push after switching.
 
 ---
 
@@ -336,14 +347,15 @@ KB saves go to Postgres only — no model job is auto-triggered. "Push to Model"
 - Worker Docker image hosted on **Amazon ECR Public** (`public.ecr.aws/<alias>/slm-worker:latest`). RunPod pulls it with no credentials needed.
 - Redis (Redis Cloud) and Postgres (Neon) are external cloud services — the worker connects out via env vars. Neither runs on RunPod.
 - **Single network volume**: `slm-celery-pod-volume` (50 GB) mounted at `/data`. All persistent data lives here:
-  - `/data/model_weights` — LLaMA 3.2 3B weights (downloaded once via `snapshot_download`, ~6 GB)
-  - `/data/model_weights/stats` — ROME C matrix stats (precomputed, ~1-2 GB) — **already computed**
+  - `/data/model_weights_instruct` — LLaMA 3.2 3B **Instruct** weights (current serving model; downloaded once via `snapshot_download`, ~6 GB)
+  - `/data/model_weights` — legacy **base** 3B weights (kept for reference/experiments)
+  - `/data/model_weights/stats` — ROME/MEMIT C matrix stats. Per-model subdirs: `_data_model_weights` (base, computed) and `_data_model_weights_instruct` (Instruct — recompute on migration)
   - `/data/hf_cache` — HuggingFace datasets cache (wikitext, ~500 MB) — **already downloaded**
-  - `/data/checkpoints` — saved model checkpoints after each edit (~6-7 GB each)
+  - `/data/checkpoints` — saved model checkpoints after each edit (~6-7 GB each). Checkpoints are model-family-specific — base-era checkpoints must not be rollback targets after the Instruct migration
 - **Critical pod env vars** (set in RunPod dashboard, not just `.env`):
-  - `MODEL_WEIGHTS_PATH=/data/model_weights`
+  - `MODEL_WEIGHTS_PATH=/data/model_weights_instruct`
   - `CHECKPOINT_DIR=/data/checkpoints`
-  - `MODEL_ID=meta-llama/Llama-3.2-3B`
+  - `MODEL_ID=meta-llama/Llama-3.2-3B-Instruct`
   - `HF_TOKEN=<token>`
 - `DATABASE_SYNC_URL` is used by the worker (psycopg2); `DATABASE_URL` (asyncpg) is not needed on the worker.
 - Worker startup time: ~2 sec on subsequent starts (weights cached on volume); ~10-15 min on first start (HF download).

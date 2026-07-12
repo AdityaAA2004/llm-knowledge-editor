@@ -142,6 +142,36 @@ async def send_message(session_id: uuid.UUID, body: ChatSendRequest, db: AsyncSe
     incident_matches = await find_incidents(db, body.prompt, limit=2)
     incident_facts = [{"text": render_incident_fact(m.incident)} for m in incident_matches]
     prompt_facts = incident_facts + context
+
+    # Nothing matched in the KB or incident log: answer deterministically instead of
+    # generating. With an empty facts block the base model invents details from the
+    # few-shot examples (observed: it answered with the example's person name), so no
+    # prompt goes to the GPU without at least one retrieved fact.
+    if not prompt_facts:
+        user_msg = ChatMessage(
+            session_id=session_id, role="user", content=body.prompt, status="complete", created_at=now
+        )
+        assistant_msg = ChatMessage(
+            session_id=session_id,
+            role="assistant",
+            content=(
+                "I couldn't find any knowledge-base facts or incidents matching that. "
+                'Try naming the API, endpoint, team, or incident number (e.g. "Payments API" or "INC-1006").'
+            ),
+            gen_params={"retrieved": [], "entities": []},
+            status="complete",
+            created_at=now + timedelta(microseconds=1),
+        )
+        db.add_all([user_msg, assistant_msg])
+        if session.title == "New chat":
+            session.title = (body.prompt[:60] + "…") if len(body.prompt) > 60 else body.prompt
+        await db.commit()
+        await db.refresh(user_msg)
+        await db.refresh(assistant_msg)
+        return ChatSendResponse(
+            user_message_id=user_msg.id, assistant_message_id=assistant_msg.id, stream_url=None
+        )
+
     model_prompt = build_rag_prompt(body.prompt, prompt_facts, history=history)
 
     # Deterministic entity pills for the UI — matched incidents first, then the KB

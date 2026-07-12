@@ -37,14 +37,13 @@ export default function TriplesPage() {
 
   const pushMut = useMutation({
     mutationFn: (tripleIds: string[]) =>
-      api.post("/jobs/edit", { triple_ids: tripleIds, job_type: tripleIds.length > 1 ? "edit_memit" : "edit_rome" }),
+      api.post("/jobs/edit", { triple_ids: tripleIds, job_type: "edit_memit" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["jobs"] });
       qc.invalidateQueries({ queryKey: ["triples", "all"] });
       const count = sel.size;
-      const algo = count > 1 ? "MEMIT" : "ROME";
       setSel(new Set());
-      setToast({ msg: `${algo} queued for ${count} triple(s)`, tone: "info" });
+      setToast({ msg: `MEMIT queued for ${count} triple(s)`, tone: "info" });
       setTimeout(() => router.push("/jobs"), 1200);
     },
     onError: (e) => setToast({ msg: (e as Error).message, tone: "danger" }),
@@ -100,7 +99,7 @@ export default function TriplesPage() {
     });
   }
 
-  const pushLabel = selectedCount > 1 ? `Push to Model (MEMIT)` : selectedCount === 1 ? "Push to Model (ROME)" : "Push to Model";
+  const pushLabel = selectedCount >= 1 ? "Push to Model (MEMIT)" : "Push to Model";
 
   return (
     <div style={{ maxWidth: "1080px", padding: "24px 28px" }}>
@@ -225,7 +224,7 @@ export default function TriplesPage() {
         <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4">
           <circle cx="7" cy="7" r="6" /><path d="M7 6.2V10 M7 4.2V4.3" />
         </svg>
-        Selecting <b style={{ margin: "0 3px", color: "var(--text-muted)" }}>1</b> pending triple uses <b style={{ margin: "0 3px", color: "var(--text-muted)" }}>ROME</b>; multiple uses a <b style={{ margin: "0 3px", color: "var(--text-muted)" }}>MEMIT</b> batch edit.
+        Selected triples are pushed as a <b style={{ margin: "0 3px", color: "var(--text-muted)" }}>MEMIT</b> batch edit (a single triple is a batch of one).
       </div>
 
       {toast && <Toast msg={toast.msg} tone={toast.tone} />}
